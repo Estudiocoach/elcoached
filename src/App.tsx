@@ -28,13 +28,29 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const id = params.get('pollId');
-    if (id) {
-      setPollId(id);
-      setMode('participant');
-    }
-  }, []);
+    const checkUrl = () => {
+      const params = new URLSearchParams(window.location.search);
+      const id = params.get('pollId');
+      if (id && id !== pollId) {
+        setPollId(id);
+        setMode('participant');
+      }
+    };
+
+    // Check on mount
+    checkUrl();
+
+    // Listen to history navigation
+    window.addEventListener('popstate', checkUrl);
+    
+    // Also poll every 500ms to catch parent website iframe updates / hash changes
+    const interval = setInterval(checkUrl, 500);
+
+    return () => {
+      window.removeEventListener('popstate', checkUrl);
+      clearInterval(interval);
+    };
+  }, [pollId]);
 
   const handleGoogleSignIn = async () => {
     try {

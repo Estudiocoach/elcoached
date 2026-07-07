@@ -13,6 +13,8 @@ interface ParticipantViewProps {
 export function ParticipantView({ pollId }: ParticipantViewProps) {
   const [poll, setPoll] = useState<Poll | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [loadingPoll, setLoadingPoll] = useState(true);
+  const [loadingQuestions, setLoadingQuestions] = useState(true);
   const [name, setName] = useState('');
   const [participantCode, setParticipantCode] = useState('');
   const [isUnirseed, setIsUnirseed] = useState(false);
@@ -31,8 +33,10 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
       if (snapshot.exists()) {
         setPoll({ id: snapshot.id, ...snapshot.data() } as Poll);
       }
+      setLoadingPoll(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.GET, `polls/${pollId}`);
+      setLoadingPoll(false);
     });
   }, [pollId]);
 
@@ -40,8 +44,10 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
     const q = query(collection(db, 'polls', pollId, 'questions'), orderBy('order'));
     return onSnapshot(q, (snapshot) => {
       setQuestions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Question)));
+      setLoadingQuestions(false);
     }, (error) => {
       handleFirestoreError(error, OperationType.LIST, `polls/${pollId}/questions`);
+      setLoadingQuestions(false);
     });
   }, [pollId]);
 
@@ -144,6 +150,14 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
       setIsSubmitting(false);
     }
   };
+
+  if (loadingPoll || loadingQuestions) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 font-sans">
+        <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
 
   if (poll?.status === 'draft') {
     return (
