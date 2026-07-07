@@ -66,6 +66,8 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
     return onSnapshot(q, (snapshot) => {
       const answeredIds = new Set(snapshot.docs.map(doc => doc.data().questionId as string));
       setAnsweredQuestionIds(answeredIds);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, `polls/${pollId}/responses`);
     });
   }, [pollId, isUnirseed, participantCode]);
 

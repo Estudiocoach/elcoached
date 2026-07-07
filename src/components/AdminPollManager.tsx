@@ -62,6 +62,8 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
         await setDoc(profileRef, newProfile);
         setProfile(newProfile);
       }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
     });
 
     return () => unsubscribeProfile();
@@ -72,6 +74,8 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
       const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
       return onSnapshot(q, (snapshot) => {
         setAllUsers(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as UserProfile)));
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'users');
       });
     }
   }, [profile]);

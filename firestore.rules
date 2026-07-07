@@ -29,5 +29,9 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, write: if true;
     }
+
+    match /users_allowed/{email} {
+      allow read, write: if true;
+    }
   }
 }
