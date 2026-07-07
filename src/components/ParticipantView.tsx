@@ -1,6 +1,6 @@
 import { useState, useEffect, FormEvent } from 'react';
 import { db } from '@/src/lib/firebase';
-import { collection, addDoc, query, where, orderBy, onSnapshot, doc, getDoc, setDoc, getDocs, runTransaction, limit } from 'firebase/firestore';
+import { collection, addDoc, query, where, orderBy, onSnapshot, doc, getDoc, setDoc } from 'firebase/firestore';
 import { Poll, Question } from '@/src/types';
 import { handleFirestoreError, OperationType } from '@/src/lib/firebase-utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -80,73 +80,30 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
     setIsGeneratingCode(true);
     try {
       let code = '';
-      let claimedDocId = '';
+      let isUnique = false;
+      let attempts = 0;
 
-      // Query for a list of unassigned pre-generated codes (limit to 5 to distribute concurrency)
-      const participantsRef = collection(db, 'polls', pollId, 'participants');
-      const q = query(participantsRef, where('assigned', '==', false), limit(5));
-      const querySnapshot = await getDocs(q);
-
-      if (!querySnapshot.empty) {
-        // Try to claim one of the available pre-generated codes atomically using a transaction
-        for (const docSnap of querySnapshot.docs) {
-          try {
-            await runTransaction(db, async (transaction) => {
-              const docRef = doc(db, 'polls', pollId, 'participants', docSnap.id);
-              const freshSnap = await transaction.get(docRef);
-              if (!freshSnap.exists()) {
-                throw new Error('Code document does not exist.');
-              }
-              const data = freshSnap.data();
-              if (data.assigned) {
-                throw new Error('Code already assigned.');
-              }
-              // Update inside transaction
-              transaction.update(docRef, {
-                name: name.trim(),
-                assigned: true,
-                joinedAt: Date.now()
-              });
-            });
-            // Successfully claimed!
-            claimedDocId = docSnap.id;
-            code = docSnap.id;
-            break;
-          } catch (transErr) {
-            console.warn(`Failed to claim pre-generated code ${docSnap.id}, trying next...`, transErr);
-          }
+      while (!isUnique && attempts < 15) {
+        // Generate random 7-digit numeric code like in Kahoot
+        code = Math.floor(1000000 + Math.random() * 9000000).toString();
+        const partDocRef = doc(db, 'polls', pollId, 'participants', code);
+        const snap = await getDoc(partDocRef);
+        if (!snap.exists()) {
+          isUnique = true;
         }
+        attempts++;
       }
 
-      // Fallback: If no code could be claimed or none were pre-generated, generate a new one dynamically
-      if (!claimedDocId) {
-        console.log('No pre-generated codes available, running dynamic generation fallback...');
-        let isUnique = false;
-        let attempts = 0;
-
-        while (!isUnique && attempts < 15) {
-          code = Math.floor(1000000 + Math.random() * 9000000).toString();
-          const partDocRef = doc(db, 'polls', pollId, 'participants', code);
-          const snap = await getDoc(partDocRef);
-          if (!snap.exists()) {
-            isUnique = true;
-          }
-          attempts++;
-        }
-
-        if (!isUnique) {
-          throw new Error('No se pudo generar un código único de respaldo.');
-        }
-
-        // Register participant in Firestore directly as assigned
-        await setDoc(doc(db, 'polls', pollId, 'participants', code), {
-          code: code,
-          name: name.trim(),
-          assigned: true,
-          createdAt: Date.now(),
-          joinedAt: Date.now()
-        });
+      if (!isUnique) {
+        throw new Error('No se pudo generar un código único.');
       }
+
+      // Register participant in Firestore
+      await setDoc(doc(db, 'polls', pollId, 'participants', code), {
+        name: name.trim(),
+        code: code,
+        createdAt: Date.now()
+      });
 
       // Save to state and localStorage
       setParticipantCode(code);
