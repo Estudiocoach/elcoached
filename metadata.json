@@ -1,0 +1,8 @@
+{
+  "name": "Coached!",
+  "description": "A professional real-time interactive Q&A and polling application for live events. Coached! allows you to engage your audience with live questions, comparisons, and beautiful feed branding.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

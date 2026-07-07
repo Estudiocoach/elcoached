@@ -1,0 +1,56 @@
+{
+  "entities": {
+    "Poll": {
+      "title": "Poll",
+      "description": "A live interaction session",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "currentQuestionId": { "type": "string" }
+      },
+      "required": ["title", "createdAt"]
+    },
+    "Question": {
+      "title": "Question",
+      "description": "A question within a poll",
+      "type": "object",
+      "properties": {
+        "pollId": { "type": "string" },
+        "text": { "type": "string" },
+        "type": { "type": "string", "enum": ["text", "multiple-choice", "rating"] },
+        "options": { "type": "array" },
+        "order": { "type": "number" }
+      },
+      "required": ["pollId", "text", "type", "order"]
+    },
+    "Response": {
+      "title": "Response",
+      "description": "A participant's response to a question",
+      "type": "object",
+      "properties": {
+        "pollId": { "type": "string" },
+        "questionId": { "type": "string" },
+        "text": { "type": "string" },
+        "value": { "type": "string" },
+        "participantName": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["pollId", "questionId", "participantName", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/polls/{pollId}": {
+      "schema": "Poll",
+      "description": "Collection of all polls"
+    },
+    "/polls/{pollId}/questions/{questionId}": {
+      "schema": "Question",
+      "description": "Subcollection of questions for a specific poll"
+    },
+    "/polls/{pollId}/responses/{responseId}": {
+      "schema": "Response",
+      "description": "Subcollection of responses for a specific poll"
+    }
+  }
+}
