@@ -20,6 +20,8 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
   const [isUnirseed, setIsUnirseed] = useState(false);
   const [showWelcomeScreen, setShowWelcomeScreen] = useState(false);
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
   
   const [responseText, setResponseText] = useState('');
   const [responseValue, setResponseValue] = useState<string | number>('');
@@ -88,6 +90,7 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
     if (!name.trim() || isGeneratingCode) return;
 
     setIsGeneratingCode(true);
+    setJoinError(null);
     try {
       let code = '';
       let isUnique = false;
@@ -128,7 +131,7 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
       setShowWelcomeScreen(true);
     } catch (err) {
       console.error('Error registering participant:', err);
-      alert('Error al conectar con la sesión. Inténtalo de nuevo.');
+      setJoinError('Error al conectar con la sesión. Por favor, inténtalo de nuevo.');
     } finally {
       setIsGeneratingCode(false);
     }
@@ -238,6 +241,11 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
           <p className="text-slate-500 mb-8 font-medium italic">¡Bienvenido a {poll?.title || 'la sesión'}!</p>
           
           <form onSubmit={handleJoin} className="space-y-6">
+            {joinError && (
+              <div className="p-4 bg-red-50 border border-red-200 text-red-600 rounded-2xl text-sm font-semibold text-center">
+                {joinError}
+              </div>
+            )}
             <div>
               <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Identifícate</label>
               <div className="relative">
@@ -460,20 +468,7 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
             </div>
           </div>
           <button 
-            onClick={() => {
-              if (confirm('¿Deseas salir de la sesión? Se borrará tu código de acceso.')) {
-                try {
-                  localStorage.removeItem(`participant_name_${pollId}`);
-                  localStorage.removeItem(`participant_code_${pollId}`);
-                } catch (e) {
-                  console.warn("localStorage is blocked or disabled in this environment:", e);
-                }
-                setName('');
-                setParticipantCode('');
-                setIsUnirseed(false);
-                setShowWelcomeScreen(false);
-              }
-            }}
+            onClick={() => setShowExitConfirm(true)}
             className="p-3 bg-white/10 text-white rounded-xl hover:bg-white/20 hover:text-red-400 transition-colors"
             title="Salir de la sesión"
           >
@@ -481,6 +476,54 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
           </button>
         </div>
       </footer>
+
+      {/* Modal de Confirmación de Salida Personalizado */}
+      <AnimatePresence>
+        {showExitConfirm && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-6 z-50 font-sans">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-white p-8 rounded-[2rem] max-w-sm w-full border border-slate-200 shadow-2xl text-center"
+            >
+              <div className="w-16 h-16 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                <LogOut className="w-8 h-8" />
+              </div>
+              <h3 className="text-2xl font-extrabold text-slate-900 mb-2">¿Salir de la sesión?</h3>
+              <p className="text-slate-500 mb-8 font-medium text-sm leading-relaxed">
+                Se borrará tu código de acceso único y tendrás que registrarte de nuevo para ver o responder las preguntas.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowExitConfirm(false)}
+                  className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition-colors active:scale-[0.98]"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => {
+                    setShowExitConfirm(false);
+                    try {
+                      localStorage.removeItem(`participant_name_${pollId}`);
+                      localStorage.removeItem(`participant_code_${pollId}`);
+                    } catch (e) {
+                      console.warn("localStorage is blocked or disabled in this environment:", e);
+                    }
+                    setName('');
+                    setParticipantCode('');
+                    setIsUnirseed(false);
+                    setShowWelcomeScreen(false);
+                  }}
+                  className="flex-1 py-4 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-sm shadow-lg shadow-red-100 transition-colors active:scale-[0.98]"
+                >
+                  Salir
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
