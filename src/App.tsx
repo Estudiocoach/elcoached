@@ -68,8 +68,10 @@ export default function App() {
       setMode('admin');
       setShowAuthModal(false);
     } catch (error: any) {
-      console.error('Error signing in with Google:', error);
-      if (error.code !== 'auth/popup-closed-by-user') {
+      if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+        console.warn('Google sign-in popup was closed or cancelled by the user.');
+      } else {
+        console.error('Error signing in with Google:', error);
         setAuthError('Error al iniciar sesión con Google.');
       }
     } finally {
@@ -91,7 +93,20 @@ export default function App() {
       setMode('admin');
       setShowAuthModal(false);
     } catch (err: any) {
-      console.error('Error with email auth:', err);
+      const knownErrorCodes = [
+        'auth/wrong-password',
+        'auth/user-not-found',
+        'auth/invalid-credential',
+        'auth/email-already-in-use',
+        'auth/weak-password',
+        'auth/invalid-email'
+      ];
+      if (knownErrorCodes.includes(err.code)) {
+        console.warn('User auth failure:', err.code, err.message);
+      } else {
+        console.error('Unexpected error with email auth:', err);
+      }
+
       if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
         setAuthError('Correo o contraseña incorrectos.');
       } else if (err.code === 'auth/email-already-in-use') {
