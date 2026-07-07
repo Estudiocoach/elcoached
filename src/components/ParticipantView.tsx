@@ -4,7 +4,7 @@ import { collection, addDoc, query, where, orderBy, onSnapshot, doc, getDoc, set
 import { Poll, Question } from '@/src/types';
 import { handleFirestoreError, OperationType } from '@/src/lib/firebase-utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { Send, User, ChevronRight, Play, LogOut } from 'lucide-react';
+import { Send, User, ChevronRight, Play, LogOut, Sparkles } from 'lucide-react';
 
 interface ParticipantViewProps {
   pollId: string;
@@ -18,7 +18,7 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
   const [name, setName] = useState('');
   const [participantCode, setParticipantCode] = useState('');
   const [isUnirseed, setIsUnirseed] = useState(false);
-  const [showCodeAssignment, setShowCodeAssignment] = useState(false);
+  const [showWelcomeScreen, setShowWelcomeScreen] = useState(false);
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
   
   const [responseText, setResponseText] = useState('');
@@ -116,8 +116,8 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
       localStorage.setItem(`participant_name_${pollId}`, name.trim());
       localStorage.setItem(`participant_code_${pollId}`, code);
       
-      // Show code display step
-      setShowCodeAssignment(true);
+      // Show welcome screen step
+      setShowWelcomeScreen(true);
     } catch (err) {
       console.error('Error registering participant:', err);
       alert('Error al conectar con la sesión. Inténtalo de nuevo.');
@@ -177,7 +177,7 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
     );
   }
 
-  if (showCodeAssignment) {
+  if (showWelcomeScreen) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 font-sans">
         <motion.div 
@@ -185,35 +185,29 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
           animate={{ opacity: 1, scale: 1 }}
           className="w-full max-w-md bg-white p-10 rounded-[2.5rem] shadow-xl border border-slate-200 text-center"
         >
-          <div className="w-16 h-16 bg-emerald-500 rounded-2xl flex items-center justify-center text-white mb-6 shadow-lg shadow-emerald-100 mx-auto">
-            <User className="w-8 h-8 animate-pulse" />
+          <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-8 shadow-lg shadow-indigo-100">
+            <Sparkles className="w-10 h-10 animate-bounce" />
           </div>
-          <h1 className="text-3xl font-black text-slate-900 mb-2 leading-tight">¡Te has unido!</h1>
-          <p className="text-slate-500 mb-8 font-medium">Hola <strong className="text-slate-850">{name}</strong>, tu código único de participante es:</p>
           
-          <div className="flex justify-center gap-1.5 mb-8">
-            {participantCode.split('').map((char, index) => (
-              <div 
-                key={index} 
-                className="w-10 h-14 bg-slate-100 border-2 border-slate-200 rounded-xl flex items-center justify-center text-2xl font-black text-indigo-600 shadow-sm"
-              >
-                {char}
-              </div>
-            ))}
-          </div>
+          <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight leading-tight mb-2">
+            ¡Bienvenido!
+          </h1>
+          <p className="text-2xl font-semibold text-indigo-600 mb-8">
+            ¿Listo para Empezar?
+          </p>
 
-          <p className="text-xs text-slate-400 font-bold uppercase tracking-widest mb-8 leading-relaxed">
-            Este código de 7 números te identifica de forma única y garantiza que tus respuestas sean tuyas.
+          <p className="text-slate-500 mb-8 font-medium leading-relaxed">
+            Hola <strong className="text-slate-800 font-bold">{name}</strong>, ya estás registrado. Haz clic en el botón de abajo para ver y responder las preguntas de la sesión.
           </p>
 
           <button 
             onClick={() => {
-              setShowCodeAssignment(false);
+              setShowWelcomeScreen(false);
               setIsUnirseed(true);
             }}
             className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-lg hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center justify-center gap-3 active:scale-[0.98]"
           >
-            Entrar a la Sesión
+            Comenzar
             <ChevronRight className="w-6 h-6" />
           </button>
         </motion.div>
@@ -465,7 +459,7 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
                 setName('');
                 setParticipantCode('');
                 setIsUnirseed(false);
-                setShowCodeAssignment(false);
+                setShowWelcomeScreen(false);
               }
             }}
             className="p-3 bg-white/10 text-white rounded-xl hover:bg-white/20 hover:text-red-400 transition-colors"
