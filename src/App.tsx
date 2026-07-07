@@ -262,13 +262,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <form 
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      resolveJoinCode(joinCodeInput);
-                    }}
-                    className="space-y-3"
-                  >
+                  <div className="space-y-3">
                     <div className="relative">
                       <input 
                         type="text"
@@ -276,6 +270,11 @@ export default function App() {
                         onChange={(e) => {
                           setJoinCodeInput(e.target.value);
                           if (joinError) setJoinError(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && joinCodeInput.trim() && !resolvingCode) {
+                            resolveJoinCode(joinCodeInput);
+                          }
                         }}
                         placeholder="ej. ABC1234"
                         maxLength={30}
@@ -305,7 +304,8 @@ export default function App() {
                         Cancelar
                       </button>
                       <button 
-                        type="submit"
+                        type="button"
+                        onClick={() => resolveJoinCode(joinCodeInput)}
                         disabled={resolvingCode || !joinCodeInput.trim()}
                         className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:hover:bg-indigo-600 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-indigo-900/40 flex items-center justify-center gap-2"
                       >
@@ -319,7 +319,7 @@ export default function App() {
                         )}
                       </button>
                     </div>
-                  </form>
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>

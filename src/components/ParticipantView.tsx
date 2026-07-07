@@ -85,8 +85,8 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
 
   const activeQuestion = questions.find(q => !answeredQuestionIds.has(q.id));
 
-  const handleJoin = async (e: FormEvent) => {
-    e.preventDefault();
+  const handleJoin = async (e?: FormEvent) => {
+    if (e) e.preventDefault();
     if (!name.trim() || isGeneratingCode) return;
 
     setIsGeneratingCode(true);
@@ -137,8 +137,8 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
     }
   };
 
-  const submitResponse = async (e: FormEvent) => {
-    e.preventDefault();
+  const submitResponse = async (e?: FormEvent) => {
+    if (e) e.preventDefault();
     if ((!responseText.trim() && !responseValue) || isSubmitting || !activeQuestion) return;
 
     setIsSubmitting(true);
@@ -240,7 +240,7 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
           <h1 className="text-3xl font-black text-slate-900 mb-2 leading-tight">Unirse a la Sesión</h1>
           <p className="text-slate-500 mb-8 font-medium italic">¡Bienvenido a {poll?.title || 'la sesión'}!</p>
           
-          <form onSubmit={handleJoin} className="space-y-6">
+          <div className="space-y-6">
             {joinError && (
               <div className="p-4 bg-red-50 border border-red-200 text-red-600 rounded-2xl text-sm font-semibold text-center">
                 {joinError}
@@ -253,6 +253,11 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && name.trim() && !isGeneratingCode) {
+                      handleJoin();
+                    }
+                  }}
                   placeholder="Ingresa tu nombre"
                   required
                   disabled={isGeneratingCode}
@@ -261,7 +266,8 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
               </div>
             </div>
             <button 
-              type="submit"
+              type="button"
+              onClick={() => handleJoin()}
               disabled={isGeneratingCode || !name.trim()}
               className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-lg hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center justify-center gap-3 active:scale-[0.98] disabled:opacity-50"
             >
@@ -277,7 +283,7 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
                 </>
               )}
             </button>
-          </form>
+          </div>
         </motion.div>
       </div>
     );
@@ -340,7 +346,7 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
               </h3>
             </div>
             
-            <form onSubmit={submitResponse} className="space-y-6">
+            <div className="space-y-6">
               {activeQuestion.type === 'text' && (
                 <textarea 
                   value={responseText}
@@ -432,13 +438,15 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
               )}
 
               <button 
+                type="button"
+                onClick={() => submitResponse()}
                 disabled={(!responseText.trim() && !responseValue) || isSubmitting}
                 className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-lg hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:grayscale flex items-center justify-center gap-3 active:scale-[0.98] shadow-lg shadow-indigo-100"
               >
                 {isSubmitting ? 'Enviando...' : activeQuestion.type === 'comparison' ? 'Confirmar Voto' : 'Enviar'}
                 <Send className="w-5 h-5" />
               </button>
-            </form>
+            </div>
           </motion.div>
         )}
 
