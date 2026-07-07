@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { db } from '@/src/lib/firebase';
-import { collection, addDoc, query, where, orderBy, onSnapshot, doc, updateDoc, setDoc, getDoc } from 'firebase/firestore';
+import { collection, addDoc, query, where, orderBy, onSnapshot, doc, updateDoc, setDoc, getDoc, writeBatch, limit, getDocs } from 'firebase/firestore';
 import { Poll, Question, Response, QuestionType, UserProfile } from '@/src/types';
 import { handleFirestoreError, OperationType } from '@/src/lib/firebase-utils';
 import { QRCodeDisplay } from './QRCodeDisplay';
@@ -20,6 +20,8 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
   const [newPollTítulo, setNewPollTítulo] = useState('');
   const [questions, setPreguntas] = useState<Question[]>([]);
   const [responses, setResponses] = useState<Response[]>([]);
+  const [participants, setParticipants] = useState<any[]>([]);
+  const [isGeneratingCodes, setIsGeneratingCodes] = useState(false);
   const [view, setView] = useState<'list' | 'create' | 'dashboard' | 'settings' | 'users'>('list');
   const [viewMode, setViewMode] = useState<'editor' | 'live' | 'participants'>('editor');
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -134,11 +136,51 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
       handleFirestoreError(error, OperationType.LIST, `polls/${activePoll.id}/responses`);
     });
 
+    const p = query(collection(db, 'polls', activePoll.id, 'participants'), orderBy('createdAt', 'desc'));
+    const unsubscribeParticipants = onSnapshot(p, async (snapshot) => {
+      const fetchedParticipants = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setParticipants(fetchedParticipants);
+
+      // Auto-pregenerate codes if this is an active poll and there are 0 participant documents
+      if (activePoll.status === 'active' && snapshot.empty && !isGeneratingCodes) {
+        setIsGeneratingCodes(true);
+        try {
+          const batch = writeBatch(db);
+          const codes = new Set<string>();
+          
+          while (codes.size < 200) {
+            const code = Math.floor(1000000 + Math.random() * 9000000).toString();
+            codes.add(code);
+          }
+
+          codes.forEach((code) => {
+            const docRef = doc(db, 'polls', activePoll.id, 'participants', code);
+            batch.set(docRef, {
+              code,
+              name: '',
+              assigned: false,
+              createdAt: Date.now()
+            });
+          });
+
+          await batch.commit();
+          console.log('Successfully pregenerated 200 participant codes on dashboard open.');
+        } catch (err) {
+          console.error('Error pregenerating participant codes:', err);
+        } finally {
+          setIsGeneratingCodes(false);
+        }
+      }
+    }, (error) => {
+      console.error('Error listening to participants:', error);
+    });
+
     return () => {
       unsubscribePreguntas();
       unsubscribeResponses();
+      unsubscribeParticipants();
     };
-  }, [activePoll]);
+  }, [activePoll, isGeneratingCodes]);
 
   const createPoll = async () => {
     if (!newPollTítulo) return;
@@ -373,11 +415,18 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
 
         <div className="flex items-center gap-6">
           {view === 'dashboard' && (
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-              <span className="text-sm font-medium text-slate-600">
-                {new Set(responses.map(r => r.participantCode || r.participantName)).size} Participantes
-              </span>
+            <div className="flex items-center gap-4 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                <span className="text-xs font-bold text-slate-700">
+                  {participants.filter(p => p.assigned).length} Participantes
+                </span>
+              </div>
+              {participants.length > 0 && (
+                <div className="text-[10px] font-black text-indigo-600 uppercase tracking-widest border-l border-slate-200 pl-3 hidden sm:block">
+                  {participants.filter(p => !p.assigned).length} Códigos Libres
+                </div>
+              )}
             </div>
           )}
           <div className="flex items-center gap-4 pl-6 border-l border-slate-200">
@@ -950,9 +999,66 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
                       <div className="mb-8 flex items-center justify-between max-w-5xl mx-auto w-full">
                         <div>
                           <h2 className="text-3xl font-black text-slate-900 tracking-tight">Resumen de Participantes</h2>
-                          <p className="text-slate-500 font-medium">{new Set(responses.map(r => r.participantCode || r.participantName)).size} participantes conectados</p>
+                          <p className="text-slate-500 font-medium">{participants.filter(p => p.assigned).length} participantes conectados con códigos de sesión</p>
                         </div>
                       </div>
+
+                      <div className="max-w-5xl mx-auto w-full mb-8 bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm grid grid-cols-1 md:grid-cols-4 gap-6 items-center">
+                        <div>
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">CÓDIGOS TOTALES</span>
+                          <span className="text-2xl font-black text-slate-800">{participants.length}</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest block mb-1">CÓDIGOS ASIGNADOS</span>
+                          <span className="text-2xl font-black text-emerald-600">{participants.filter(p => p.assigned).length}</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest block mb-1">CÓDIGOS DISPONIBLES</span>
+                          <span className="text-2xl font-black text-indigo-600">{participants.filter(p => !p.assigned).length}</span>
+                        </div>
+                        <div className="text-right">
+                          <button
+                            onClick={async () => {
+                              if (isGeneratingCodes) return;
+                              setIsGeneratingCodes(true);
+                              try {
+                                const batch = writeBatch(db);
+                                const codes = new Set<string>();
+                                
+                                while (codes.size < 100) {
+                                  const code = Math.floor(1000000 + Math.random() * 9000000).toString();
+                                  if (!participants.some(p => p.code === code)) {
+                                    codes.add(code);
+                                  }
+                                }
+
+                                codes.forEach((code) => {
+                                  const docRef = doc(db, 'polls', activePoll.id, 'participants', code);
+                                  batch.set(docRef, {
+                                    code,
+                                    name: '',
+                                    assigned: false,
+                                    createdAt: Date.now()
+                                  });
+                                });
+
+                                await batch.commit();
+                                alert('¡Se han generado 100 códigos adicionales exitosamente!');
+                              } catch (err) {
+                                console.error(err);
+                                alert('Error al generar más códigos.');
+                              } finally {
+                                setIsGeneratingCodes(false);
+                              }
+                            }}
+                            disabled={isGeneratingCodes}
+                            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl disabled:opacity-50 transition-all shadow-md active:scale-95"
+                          >
+                            {isGeneratingCodes ? 'Generando...' : '+ 100 Códigos'}
+                          </button>
+                        </div>
+                      </div>
+
                       <div className="max-w-5xl mx-auto w-full grid grid-cols-1 md:grid-cols-2 gap-6">
                         {Array.from(new Set<string>(responses.map(r => r.participantCode || r.participantName))).map(participantKey => {
                           const participantResponses = responses.filter(r => (r.participantCode || r.participantName) === participantKey);
