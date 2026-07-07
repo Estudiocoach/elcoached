@@ -53,12 +53,16 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
 
   // Load saved session on mount
   useEffect(() => {
-    const savedName = localStorage.getItem(`participant_name_${pollId}`);
-    const savedCode = localStorage.getItem(`participant_code_${pollId}`);
-    if (savedName && savedCode) {
-      setName(savedName);
-      setParticipantCode(savedCode);
-      setIsUnirseed(true);
+    try {
+      const savedName = localStorage.getItem(`participant_name_${pollId}`);
+      const savedCode = localStorage.getItem(`participant_code_${pollId}`);
+      if (savedName && savedCode) {
+        setName(savedName);
+        setParticipantCode(savedCode);
+        setIsUnirseed(true);
+      }
+    } catch (e) {
+      console.warn("localStorage is blocked or disabled in this environment:", e);
     }
   }, [pollId]);
 
@@ -113,8 +117,12 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
 
       // Save to state and localStorage
       setParticipantCode(code);
-      localStorage.setItem(`participant_name_${pollId}`, name.trim());
-      localStorage.setItem(`participant_code_${pollId}`, code);
+      try {
+        localStorage.setItem(`participant_name_${pollId}`, name.trim());
+        localStorage.setItem(`participant_code_${pollId}`, code);
+      } catch (e) {
+        console.warn("localStorage is blocked or disabled in this environment:", e);
+      }
       
       // Show welcome screen step
       setShowWelcomeScreen(true);
@@ -454,8 +462,12 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
           <button 
             onClick={() => {
               if (confirm('¿Deseas salir de la sesión? Se borrará tu código de acceso.')) {
-                localStorage.removeItem(`participant_name_${pollId}`);
-                localStorage.removeItem(`participant_code_${pollId}`);
+                try {
+                  localStorage.removeItem(`participant_name_${pollId}`);
+                  localStorage.removeItem(`participant_code_${pollId}`);
+                } catch (e) {
+                  console.warn("localStorage is blocked or disabled in this environment:", e);
+                }
                 setName('');
                 setParticipantCode('');
                 setIsUnirseed(false);
