@@ -18,7 +18,7 @@
       "properties": {
         "pollId": { "type": "string" },
         "text": { "type": "string" },
-        "type": { "type": "string", "enum": ["text", "multiple-choice", "rating"] },
+        "type": { "type": "string", "enum": ["text", "multiple-choice", "rating", "comparison", "four-options", "true-false", "brainstorm", "word-cloud", "open-ended", "guess-name", "complete-sequence"] },
         "options": { "type": "array" },
         "order": { "type": "number" }
       },

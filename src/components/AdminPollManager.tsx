@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { db } from '@/src/lib/firebase';
 import { collection, addDoc, query, where, orderBy, onSnapshot, doc, updateDoc, setDoc, getDoc } from 'firebase/firestore';
 import { Poll, Question, Response, QuestionType, UserProfile } from '@/src/types';
@@ -32,6 +32,32 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
   const [optionBImage, setOptionBImage] = useState('');
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [groupingResponseId, setGroupingResponseId] = useState<string | null>(null);
+  const [newGroupNameInput, setNewGroupNameInput] = useState('');
+
+  // New states for Guess Name and Complete Sequence
+  const [guessNameImageUrl, setGuessNameImageUrl] = useState('');
+  const [guessNameCorrectAnswer, setGuessNameCorrectAnswer] = useState('');
+  const [sequenceItemsInput, setSequenceItemsInput] = useState('');
+  const [sequenceMissingIndexInput, setSequenceMissingIndexInput] = useState<number>(0);
+  const [revealLiveAnswer, setRevealLiveAnswer] = useState(false);
+
+  useEffect(() => {
+    setRevealLiveAnswer(false);
+  }, [activePoll?.currentQuestionId]);
+
+  const handleTypeChange = (type: QuestionType) => {
+    setNewQuestionType(type);
+    if (type === 'four-options') {
+      setNewQuestionOptions(['', '', '', '']);
+    } else if (type === 'multiple-choice') {
+      setNewQuestionOptions(['', '']);
+    } else if (type === 'true-false') {
+      setNewQuestionOptions(['Verdadero', 'Falso']);
+    } else {
+      setNewQuestionOptions(['', '']);
+    }
+  };
 
   // User Management state
   const [newUserEmail, setNewUserEmail] = useState('');
@@ -232,9 +258,21 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
   };
 
   const addQuestion = async (pollId: string, text: string) => {
-    const options = newQuestionType === 'multiple-choice' 
-      ? newQuestionOptions.map(o => o.trim()).filter(o => o)
-      : [];
+    let options: string[] = [];
+    if (newQuestionType === 'multiple-choice' || newQuestionType === 'four-options') {
+      options = newQuestionOptions.map(o => o.trim()).filter(o => o);
+    } else if (newQuestionType === 'true-false') {
+      options = ['Verdadero', 'Falso'];
+    }
+
+    let seqItems: string[] = [];
+    let correctAns = '';
+    if (newQuestionType === 'complete-sequence') {
+      seqItems = sequenceItemsInput.split(',').map(item => item.trim()).filter(item => item);
+      correctAns = seqItems[sequenceMissingIndexInput] || '';
+    } else if (newQuestionType === 'guess-name') {
+      correctAns = guessNameCorrectAnswer.trim();
+    }
 
     try {
       await addDoc(collection(db, 'polls', pollId, 'questions'), {
@@ -244,11 +282,19 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
         options,
         optionAImage: newQuestionType === 'comparison' ? optionAImage : '',
         optionBImage: newQuestionType === 'comparison' ? optionBImage : '',
+        imageUrl: newQuestionType === 'guess-name' ? guessNameImageUrl.trim() : '',
+        correctAnswer: correctAns,
+        sequenceItems: seqItems,
+        sequenceMissingIndex: newQuestionType === 'complete-sequence' ? sequenceMissingIndexInput : 0,
         order: questions.length + 1
       });
       setNewQuestionOptions(['', '']);
       setOptionAImage('');
       setOptionBImage('');
+      setGuessNameImageUrl('');
+      setGuessNameCorrectAnswer('');
+      setSequenceItemsInput('');
+      setSequenceMissingIndexInput(0);
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `polls/${pollId}/questions`);
     }
@@ -266,10 +312,37 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
 
   const updateQuestion = async (pollId: string, questionId: string, updates: Partial<Question>) => {
     try {
+      if (updates.type === 'true-false') {
+        updates.options = ['Verdadero', 'Falso'];
+      } else if (updates.type === 'four-options') {
+        updates.options = ['Opción A', 'Opción B', 'Opción C', 'Opción D'];
+      }
       await updateDoc(doc(db, 'polls', pollId, 'questions', questionId), updates);
       setEditingQuestionId(null);
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `polls/${pollId}/questions/${questionId}`);
+    }
+  };
+
+  const groupIdea = async (pollId: string, responseId: string, groupName: string) => {
+    try {
+      await updateDoc(doc(db, 'polls', pollId, 'responses', responseId), {
+        group: groupName.trim()
+      });
+      setGroupingResponseId(null);
+      setNewGroupNameInput('');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `polls/${pollId}/responses/${responseId}`);
+    }
+  };
+
+  const ungroupIdea = async (pollId: string, responseId: string) => {
+    try {
+      await updateDoc(doc(db, 'polls', pollId, 'responses', responseId), {
+        group: ''
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `polls/${pollId}/responses/${responseId}`);
     }
   };
 
@@ -639,13 +712,20 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
                     <div className="flex flex-col gap-3">
                       <select 
                         value={newQuestionType}
-                        onChange={(e) => setNewQuestionType(e.target.value as QuestionType)}
+                        onChange={(e) => handleTypeChange(e.target.value as QuestionType)}
                         className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 font-bold hover:bg-slate-100 transition-colors cursor-pointer"
                       >
-                        <option value="text">Respuesta Abierta</option>
-                        <option value="multiple-choice">Opción Múltiple</option>
+                        <option value="text">Respuesta Abierta (Estándar)</option>
+                        <option value="open-ended">Preguntas Abiertas (hasta 250 caracteres)</option>
+                        <option value="brainstorm">Lluvia de Ideas (hasta 75 caracteres)</option>
+                        <option value="word-cloud">Nube de Palabras (una sola palabra)</option>
+                        <option value="multiple-choice">Opción Múltiple (Dinámica)</option>
+                        <option value="four-options">4 Opciones (A, B, C, D)</option>
+                        <option value="true-false">Verdadero o Falso</option>
                         <option value="rating">Calificación (1-10)</option>
                         <option value="comparison">Comparación A vs B</option>
+                        <option value="guess-name">Adivina su nombre (Imagen + Entrada)</option>
+                        <option value="complete-sequence">Completa la secuencia</option>
                       </select>
                       <textarea 
                         name="question"
@@ -676,6 +756,72 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
                               rows={2}
                             />
                           </div>
+                        </div>
+                      )}
+                      {newQuestionType === 'guess-name' && (
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">URL de la Imagen</label>
+                            <input 
+                              type="text"
+                              value={guessNameImageUrl}
+                              onChange={(e) => setGuessNameImageUrl(e.target.value)}
+                              placeholder="https://ejemplo.com/imagen.jpg o URL"
+                              required
+                              className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white font-bold"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">Respuesta Correcta</label>
+                            <input 
+                              type="text"
+                              value={guessNameCorrectAnswer}
+                              onChange={(e) => setGuessNameCorrectAnswer(e.target.value)}
+                              placeholder="Nombre exacto a adivinar..."
+                              required
+                              className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white font-bold"
+                            />
+                          </div>
+                        </div>
+                      )}
+                      {newQuestionType === 'complete-sequence' && (
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">Elementos (separados por coma)</label>
+                            <input 
+                              type="text"
+                              value={sequenceItemsInput}
+                              onChange={(e) => {
+                                setSequenceItemsInput(e.target.value);
+                                setSequenceMissingIndexInput(0);
+                              }}
+                              placeholder="Fase 1, Fase 2, Fase 3, Fase 4"
+                              required
+                              className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white font-bold"
+                            />
+                            <p className="text-[9px] text-slate-400 mt-1 ml-1 leading-normal font-bold uppercase tracking-wider">Escribe la serie en orden.</p>
+                          </div>
+                          
+                          {(() => {
+                            const items = sequenceItemsInput.split(',').map(item => item.trim()).filter(item => item);
+                            if (items.length === 0) return null;
+                            return (
+                              <div>
+                                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1 font-bold">Elemento Oculto a Completar</label>
+                                <select
+                                  value={sequenceMissingIndexInput}
+                                  onChange={(e) => setSequenceMissingIndexInput(Number(e.target.value))}
+                                  className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 font-black hover:bg-slate-100 transition-colors cursor-pointer"
+                                >
+                                  {items.map((item, idx) => (
+                                    <option key={idx} value={idx}>
+                                      {idx + 1}. {item} (Se ocultará)
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
                       {newQuestionType === 'multiple-choice' && (
@@ -712,6 +858,61 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
                             <Plus className="w-3 h-3" />
                             Añadir Opción
                           </button>
+                        </div>
+                      )}
+                      {newQuestionType === 'four-options' && (
+                        <div className="space-y-2">
+                          {['A', 'B', 'C', 'D'].map((letter, i) => (
+                            <div key={i} className="flex items-center gap-2">
+                              <span className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-black text-sm border border-indigo-100 shrink-0">
+                                {letter}
+                              </span>
+                              <input 
+                                value={newQuestionOptions[i] || ''}
+                                onChange={(e) => {
+                                  const newOpts = [...newQuestionOptions];
+                                  newOpts[i] = e.target.value;
+                                  setNewQuestionOptions(newOpts);
+                                }}
+                                placeholder={`Opción ${letter}`}
+                                required
+                                className="flex-1 px-4 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {newQuestionType === 'true-false' && (
+                        <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl text-emerald-800 text-xs font-semibold flex items-center gap-2">
+                          <span>✓</span>
+                          <span>Esta pregunta mostrará dos opciones fijas para los participantes: Verdadero y Falso.</span>
+                        </div>
+                      )}
+                      {newQuestionType === 'brainstorm' && (
+                        <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-2xl text-indigo-800 text-xs font-semibold flex flex-col gap-1.5">
+                          <div className="flex items-center gap-2 font-black">
+                            <span>💡</span>
+                            <span>Lluvia de Ideas (Brainstorming)</span>
+                          </div>
+                          <p className="text-slate-600 font-medium">Los participantes pueden enviar múltiples ideas de hasta 75 caracteres. En la pantalla grande podrás agrupar las ideas parecidas en categorías personalizadas en tiempo real.</p>
+                        </div>
+                      )}
+                      {newQuestionType === 'word-cloud' && (
+                        <div className="p-4 bg-purple-50 border border-purple-100 rounded-2xl text-purple-800 text-xs font-semibold flex flex-col gap-1.5">
+                          <div className="flex items-center gap-2 font-black">
+                            <span>☁️</span>
+                            <span>Nube de Palabras</span>
+                          </div>
+                          <p className="text-slate-600 font-medium">Los participantes pueden enviar palabras individuales de hasta 30 caracteres. Se mostrará una nube interactiva con los términos más votados con mayor tamaño.</p>
+                        </div>
+                      )}
+                      {newQuestionType === 'open-ended' && (
+                        <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl text-blue-800 text-xs font-semibold flex flex-col gap-1.5">
+                          <div className="flex items-center gap-2 font-black">
+                            <span>💬</span>
+                            <span>Preguntas Abiertas (hasta 250 caracteres)</span>
+                          </div>
+                          <p className="text-slate-600 font-medium">Los participantes pueden escribir respuestas detalladas de hasta 250 caracteres. Se visualizarán en la pantalla grande como tarjetas elegantes con animación de entrada.</p>
                         </div>
                       )}
                     </div>
@@ -832,15 +1033,70 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
                                     className="w-full text-lg font-bold text-slate-900 border-none focus:ring-0 p-0 placeholder-slate-300"
                                     placeholder="Texto de la pregunta..."
                                   />
+                                  
+                                  {question.type === 'guess-name' && (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                                      <div>
+                                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">URL de la Imagen</label>
+                                        <input 
+                                          type="text"
+                                          id={`edit-image-${question.id}`}
+                                          defaultValue={question.imageUrl}
+                                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none font-bold"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Respuesta Correcta</label>
+                                        <input 
+                                          type="text"
+                                          id={`edit-correct-${question.id}`}
+                                          defaultValue={question.correctAnswer}
+                                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none font-bold"
+                                        />
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {question.type === 'complete-sequence' && (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                                      <div>
+                                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Elementos (por comas)</label>
+                                        <input 
+                                          type="text"
+                                          id={`edit-seq-items-${question.id}`}
+                                          defaultValue={question.sequenceItems?.join(', ')}
+                                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none font-bold"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Índice Oculto (0, 1, 2...)</label>
+                                        <input 
+                                          type="number"
+                                          id={`edit-seq-missing-${question.id}`}
+                                          defaultValue={question.sequenceMissingIndex}
+                                          className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none font-bold"
+                                        />
+                                      </div>
+                                    </div>
+                                  )}
+
                                   <div className="flex flex-wrap gap-3">
                                     <select 
                                       id={`edit-type-${question.id}`}
                                       defaultValue={question.type}
-                                      className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 outline-none"
+                                      className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-600 outline-none cursor-pointer font-black"
                                     >
-                                      <option value="text">Long Answer</option>
-                                      <option value="multiple-choice">Opción Múltiple</option>
+                                      <option value="text">Respuesta Abierta (Estándar)</option>
+                                      <option value="open-ended">Preguntas Abiertas (hasta 250 caracteres)</option>
+                                      <option value="brainstorm">Lluvia de Ideas (hasta 75 caracteres)</option>
+                                      <option value="word-cloud">Nube de Palabras (una sola palabra)</option>
+                                      <option value="multiple-choice">Opción Múltiple (Dinámica)</option>
+                                      <option value="four-options">4 Opciones (A, B, C, D)</option>
+                                      <option value="true-false">Verdadero o Falso</option>
                                       <option value="rating">Calificación (1-10)</option>
+                                      <option value="comparison">Comparación A vs B</option>
+                                      <option value="guess-name">Adivina su nombre (Imagen + Entrada)</option>
+                                      <option value="complete-sequence">Completa la secuencia</option>
                                     </select>
                                     <div className="flex gap-2 ml-auto">
                                       <button 
@@ -853,10 +1109,30 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
                                         onClick={() => {
                                           const textInput = document.getElementById(`edit-text-${question.id}`) as HTMLInputElement;
                                           const typeInput = document.getElementById(`edit-type-${question.id}`) as HTMLSelectElement;
-                                          updateQuestion(activePoll.id, question.id, { 
+                                          
+                                          const updates: Partial<Question> = { 
                                             text: textInput.value,
                                             type: typeInput.value as QuestionType
-                                          });
+                                          };
+
+                                          if (question.type === 'guess-name') {
+                                            const imgInput = document.getElementById(`edit-image-${question.id}`) as HTMLInputElement;
+                                            const corrInput = document.getElementById(`edit-correct-${question.id}`) as HTMLInputElement;
+                                            if (imgInput) updates.imageUrl = imgInput.value.trim();
+                                            if (corrInput) updates.correctAnswer = corrInput.value.trim();
+                                          } else if (question.type === 'complete-sequence') {
+                                            const seqInput = document.getElementById(`edit-seq-items-${question.id}`) as HTMLInputElement;
+                                            const missingInput = document.getElementById(`edit-seq-missing-${question.id}`) as HTMLInputElement;
+                                            if (seqInput) {
+                                              const items = seqInput.value.split(',').map(item => item.trim()).filter(item => item);
+                                              updates.sequenceItems = items;
+                                              const mIndex = Number(missingInput?.value || 0);
+                                              updates.sequenceMissingIndex = mIndex;
+                                              updates.correctAnswer = items[mIndex] || '';
+                                            }
+                                          }
+
+                                          updateQuestion(activePoll.id, question.id, updates);
                                         }}
                                         className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 transition-colors shadow-md flex items-center gap-2"
                                       >
@@ -898,10 +1174,43 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
                                     {question.options && question.options.length > 0 && (
                                       <div className="flex flex-wrap gap-2">
                                         {question.options.map((opt, i) => (
-                                          <span key={i} className="px-2 py-1 bg-indigo-50 text-indigo-600 text-[10px] font-medium rounded-md border border-indigo-100">
+                                          <span key={i} className="px-2 py-1 bg-indigo-50 text-indigo-600 text-[10px] font-medium rounded-md border border-indigo-100 font-bold">
                                             {opt}
                                           </span>
                                         ))}
+                                      </div>
+                                    )}
+
+                                    {question.type === 'guess-name' && (
+                                      <div className="mt-2 flex items-center gap-3 bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                                        {question.imageUrl ? (
+                                          <img src={question.imageUrl} alt="Guess" className="w-12 h-12 rounded-lg object-cover border border-slate-200" referrerPolicy="no-referrer" />
+                                        ) : (
+                                          <div className="w-12 h-12 bg-slate-200 rounded-lg flex items-center justify-center text-[10px] font-bold text-slate-400">Sin img</div>
+                                        )}
+                                        <div>
+                                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Respuesta correcta</p>
+                                          <p className="text-xs font-extrabold text-emerald-600 uppercase">{question.correctAnswer}</p>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {question.type === 'complete-sequence' && (
+                                      <div className="mt-2 bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-2">Secuencia de elementos</p>
+                                        <div className="flex flex-wrap items-center gap-1.5">
+                                          {question.sequenceItems?.map((item, idx) => {
+                                            const isMissing = idx === question.sequenceMissingIndex;
+                                            return (
+                                              <React.Fragment key={idx}>
+                                                {idx > 0 && <span className="text-slate-300 text-xs font-black">➔</span>}
+                                                <span className={`px-2 py-1 text-[10px] font-bold rounded-lg ${isMissing ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm' : 'bg-white text-slate-600 border border-slate-100'}`}>
+                                                  {isMissing ? `[🔍 ${item}]` : item}
+                                                </span>
+                                              </React.Fragment>
+                                            );
+                                          })}
+                                        </div>
                                       </div>
                                     )}
                                   </div>
@@ -1210,6 +1519,829 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
                           </motion.div>
                         );
                       });
+                    })()}
+                  </div>
+                ) : questions.find(q => q.id === (activePoll.currentQuestionId || questions[0]?.id))?.type === 'four-options' ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-6">
+                    {(() => {
+                      const currentQ = questions.find(q => q.id === (activePoll.currentQuestionId || questions[0]?.id));
+                      const qResponses = responses.filter(r => r.questionId === currentQ?.id);
+                      const totalVotes = qResponses.length;
+                      const letters = ['A', 'B', 'C', 'D'];
+                      const colors = [
+                        { text: 'text-indigo-600', bg: 'bg-indigo-50 border-indigo-100', fill: 'bg-indigo-500/10', circle: 'bg-indigo-600' },
+                        { text: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-100', fill: 'bg-emerald-500/10', circle: 'bg-emerald-600' },
+                        { text: 'text-rose-600', bg: 'bg-rose-50 border-rose-100', fill: 'bg-rose-500/10', circle: 'bg-rose-600' },
+                        { text: 'text-amber-600', bg: 'bg-amber-50 border-amber-100', fill: 'bg-amber-500/10', circle: 'bg-amber-600' }
+                      ];
+                      
+                      return currentQ?.options?.slice(0, 4).map((option, idx) => {
+                        const votes = qResponses.filter(r => r.value === option).length;
+                        const percentage = totalVotes > 0 ? Math.round((votes / totalVotes) * 100) : 0;
+                        const colorSet = colors[idx] || colors[0];
+                        
+                        return (
+                          <motion.div 
+                            key={option}
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ delay: idx * 0.05 }}
+                            className="bg-white p-6 rounded-3xl border-2 border-slate-100 shadow-lg hover:shadow-xl transition-shadow relative overflow-hidden flex flex-col justify-between min-h-[160px]"
+                          >
+                            <div className="relative z-10 flex items-start justify-between">
+                              <div className="flex items-center gap-4">
+                                <div className={`w-12 h-12 ${colorSet.circle} text-white font-black text-xl rounded-2xl flex items-center justify-center shadow-md`}>
+                                  {letters[idx]}
+                                </div>
+                                <span className="text-xl font-black text-slate-800 line-clamp-2 max-w-[220px]">{option}</span>
+                              </div>
+                              <div className="text-right">
+                                <span className={`text-4xl font-black ${colorSet.text} block leading-none`}>{votes}</span>
+                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{votes === 1 ? 'voto' : 'votos'}</span>
+                              </div>
+                            </div>
+                            
+                            <div className="relative z-10 mt-6 flex justify-between items-end">
+                              <span className="text-sm font-bold text-slate-400">Progreso</span>
+                              <span className={`text-xl font-black ${colorSet.text}`}>{percentage}%</span>
+                            </div>
+
+                            <motion.div 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${percentage}%` }}
+                              transition={{ duration: 1, ease: "easeOut" }}
+                              className={`absolute bottom-0 left-0 top-0 ${colorSet.fill} -z-10`}
+                            />
+                          </motion.div>
+                        );
+                      });
+                    })()}
+                  </div>
+                ) : questions.find(q => q.id === (activePoll.currentQuestionId || questions[0]?.id))?.type === 'true-false' ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8 py-6">
+                    {(() => {
+                      const currentQ = questions.find(q => q.id === (activePoll.currentQuestionId || questions[0]?.id));
+                      const qResponses = responses.filter(r => r.questionId === currentQ?.id);
+                      const totalVotes = qResponses.length;
+                      
+                      const votesTrue = qResponses.filter(r => r.value === 'Verdadero' || r.value === 'true' || r.value === true).length;
+                      const votesFalse = qResponses.filter(r => r.value === 'Falso' || r.value === 'false' || r.value === false).length;
+                      
+                      const percentTrue = totalVotes > 0 ? Math.round((votesTrue / totalVotes) * 100) : 0;
+                      const percentFalse = totalVotes > 0 ? Math.round((votesFalse / totalVotes) * 100) : 0;
+                      
+                      return (
+                        <>
+                          <motion.div 
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="bg-white rounded-[2.5rem] shadow-xl border-2 border-emerald-50 p-8 flex flex-col justify-between overflow-hidden relative group min-h-[220px]"
+                          >
+                            <div className="relative z-10 flex justify-between items-start">
+                              <div>
+                                <span className="px-4 py-1.5 bg-emerald-50 text-emerald-700 text-xs font-black rounded-full uppercase tracking-wider">
+                                  Verdadero
+                                </span>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-6xl font-black text-emerald-600 block leading-none">{votesTrue}</span>
+                                <span className="text-xs font-black text-slate-400 uppercase tracking-widest">{votesTrue === 1 ? 'Voto' : 'Votos'}</span>
+                              </div>
+                            </div>
+                            <div className="relative z-10 mt-8 flex justify-between items-end">
+                              <span className="text-slate-400 font-bold">Porcentaje de votos</span>
+                              <span className="text-4xl font-black text-emerald-600">{percentTrue}%</span>
+                            </div>
+                            <motion.div 
+                              initial={{ height: 0 }}
+                              animate={{ height: `${percentTrue}%` }}
+                              transition={{ duration: 1, ease: "easeOut" }}
+                              className="absolute bottom-0 left-0 right-0 bg-emerald-500/5 -z-10"
+                            />
+                          </motion.div>
+
+                          <motion.div 
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: 0.1 }}
+                            className="bg-white rounded-[2.5rem] shadow-xl border-2 border-rose-50 p-8 flex flex-col justify-between overflow-hidden relative group min-h-[220px]"
+                          >
+                            <div className="relative z-10 flex justify-between items-start">
+                              <div>
+                                <span className="px-4 py-1.5 bg-rose-50 text-rose-700 text-xs font-black rounded-full uppercase tracking-wider">
+                                  Falso
+                                </span>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-6xl font-black text-rose-600 block leading-none">{votesFalse}</span>
+                                <span className="text-xs font-black text-slate-400 uppercase tracking-widest">{votesFalse === 1 ? 'Voto' : 'Votos'}</span>
+                              </div>
+                            </div>
+                            <div className="relative z-10 mt-8 flex justify-between items-end">
+                              <span className="text-slate-400 font-bold">Porcentaje de votos</span>
+                              <span className="text-4xl font-black text-rose-600">{percentFalse}%</span>
+                            </div>
+                            <motion.div 
+                              initial={{ height: 0 }}
+                              animate={{ height: `${percentFalse}%` }}
+                              transition={{ duration: 1, ease: "easeOut" }}
+                              className="absolute bottom-0 left-0 right-0 bg-rose-500/5 -z-10"
+                            />
+                          </motion.div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                ) : questions.find(q => q.id === (activePoll.currentQuestionId || questions[0]?.id))?.type === 'rating' ? (
+                  <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-xl flex flex-col gap-8 w-full">
+                    {(() => {
+                      const currentQ = questions.find(q => q.id === (activePoll.currentQuestionId || questions[0]?.id));
+                      const qResponses = responses.filter(r => r.questionId === currentQ?.id);
+                      const totalVotes = qResponses.length;
+                      
+                      const scoreCounts = Array(10).fill(0);
+                      qResponses.forEach(r => {
+                        const val = Number(r.value);
+                        if (val >= 1 && val <= 10) {
+                          scoreCounts[val - 1]++;
+                        }
+                      });
+                      
+                      const maxVotes = Math.max(...scoreCounts, 1);
+                      const averageRating = totalVotes > 0 
+                        ? (qResponses.reduce((sum, r) => sum + Number(r.value || 0), 0) / totalVotes).toFixed(1)
+                        : '0.0';
+                        
+                      return (
+                        <>
+                          {/* Stats Header */}
+                          <div className="flex flex-wrap gap-6 items-center justify-between pb-6 border-b border-slate-100">
+                            <div className="flex items-center gap-4">
+                              <div className="w-14 h-14 bg-yellow-400 rounded-2xl flex items-center justify-center text-white shadow-lg shadow-yellow-100">
+                                <span className="text-2xl font-black">★</span>
+                              </div>
+                              <div>
+                                <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest leading-none mb-1.5">Calificación Promedio</h4>
+                                <div className="flex items-baseline gap-1.5 leading-none">
+                                  <span className="text-3xl font-black text-slate-900 leading-none">{averageRating}</span>
+                                  <span className="text-xs font-bold text-slate-400">/ 10</span>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            <div className="flex gap-8">
+                              <div className="text-right">
+                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block leading-none mb-1.5">Total Votos</span>
+                                <span className="text-3xl font-black text-indigo-600 leading-none">{totalVotes}</span>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {/* 10-Bar Chart */}
+                          <div className="flex h-64 items-end gap-1.5 md:gap-3 pt-10 px-2 select-none w-full">
+                            {scoreCounts.map((count, index) => {
+                              const score = index + 1;
+                              const percentageHeight = maxVotes > 0 ? (count / maxVotes) * 100 : 0;
+                              
+                              return (
+                                <div key={score} className="flex-1 flex flex-col items-center h-full justify-end relative group">
+                                  {/* Vote count bubble */}
+                                  <motion.div 
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: count > 0 ? 1 : 0.2, y: 0 }}
+                                    className={`absolute -top-8 px-1.5 py-0.5 rounded-lg text-[10px] font-black text-center ${count > 0 ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-300'}`}
+                                  >
+                                    {count}
+                                  </motion.div>
+                                  
+                                  {/* Bar */}
+                                  <div className="w-full bg-slate-50 border border-slate-100 rounded-2xl h-full flex items-end overflow-hidden relative">
+                                    <motion.div 
+                                      initial={{ height: 0 }}
+                                      animate={{ height: `${percentageHeight}%` }}
+                                      transition={{ type: "spring", stiffness: 100, damping: 15 }}
+                                      className={`w-full rounded-b-xl ${count > 0 ? 'bg-gradient-to-t from-indigo-500 to-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.3)]' : 'bg-slate-100'}`}
+                                    />
+                                  </div>
+                                  
+                                  {/* Score Label */}
+                                  <span className={`mt-2 text-xs md:text-sm font-black transition-colors ${count > 0 ? 'text-indigo-600 scale-110' : 'text-slate-400'}`}>
+                                    {score}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                ) : questions.find(q => q.id === (activePoll.currentQuestionId || questions[0]?.id))?.type === 'brainstorm' ? (
+                  <div className="flex flex-col gap-8 py-4 w-full text-left">
+                    {(() => {
+                      const currentQ = questions.find(q => q.id === (activePoll.currentQuestionId || questions[0]?.id));
+                      const qResponses = responses.filter(r => r.questionId === currentQ?.id);
+                      
+                      const ungrouped = qResponses.filter(r => !r.group);
+                      const grouped = qResponses.filter(r => r.group);
+                      const groups = Array.from(new Set(grouped.map(r => r.group).filter(Boolean))) as string[];
+                      
+                      const colors = [
+                        { bg: 'bg-indigo-50/70 border-indigo-200', text: 'text-indigo-800', badge: 'bg-indigo-600 text-white', pill: 'bg-indigo-100 text-indigo-700' },
+                        { bg: 'bg-emerald-50/70 border-emerald-200', text: 'text-emerald-800', badge: 'bg-emerald-600 text-white', pill: 'bg-emerald-100 text-emerald-700' },
+                        { bg: 'bg-amber-50/70 border-amber-200', text: 'text-amber-800', badge: 'bg-amber-600 text-white', pill: 'bg-amber-100 text-amber-700' },
+                        { bg: 'bg-pink-50/70 border-pink-200', text: 'text-pink-800', badge: 'bg-pink-600 text-white', pill: 'bg-pink-100 text-pink-700' },
+                        { bg: 'bg-sky-50/70 border-sky-200', text: 'text-sky-800', badge: 'bg-sky-600 text-white', pill: 'bg-sky-100 text-sky-700' },
+                        { bg: 'bg-violet-50/70 border-violet-200', text: 'text-violet-800', badge: 'bg-violet-600 text-white', pill: 'bg-violet-100 text-violet-700' }
+                      ];
+
+                      return (
+                        <div className="space-y-8 w-full">
+                          {/* Ungrouped Ideas */}
+                          <div>
+                            <div className="flex items-center gap-3 mb-4">
+                              <span className="w-2.5 h-2.5 rounded-full bg-slate-400 animate-pulse" />
+                              <h4 className="text-sm font-black text-slate-400 uppercase tracking-widest">
+                                Ideas Recibidas ({ungrouped.length})
+                              </h4>
+                            </div>
+                            
+                            {ungrouped.length === 0 ? (
+                              <div className="p-8 border-2 border-dashed border-slate-100 rounded-[2rem] text-center text-slate-300 font-bold text-base">
+                                Esperando ideas de los participantes...
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                <AnimatePresence mode="popLayout">
+                                  {ungrouped.map((idea) => {
+                                    const isGrouping = groupingResponseId === idea.id;
+                                    return (
+                                      <motion.div
+                                        key={idea.id}
+                                        layout
+                                        initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                                        exit={{ opacity: 0, scale: 0.9, y: -10 }}
+                                        className="bg-white p-5 rounded-2xl border border-slate-100 shadow-md hover:shadow-lg transition-all flex flex-col justify-between min-h-[140px] relative overflow-hidden"
+                                      >
+                                        {!isGrouping ? (
+                                          <>
+                                            <p className="text-slate-800 font-bold text-lg leading-snug mb-4">
+                                              "{idea.text || idea.value}"
+                                            </p>
+                                            <div className="flex items-center justify-between mt-auto gap-2">
+                                              <span className="text-xs font-black text-slate-400 uppercase tracking-wider truncate max-w-[150px]">
+                                                👤 {idea.participantName}
+                                              </span>
+                                              <button
+                                                onClick={() => {
+                                                  setGroupingResponseId(idea.id);
+                                                  setNewGroupNameInput('');
+                                                }}
+                                                className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-black rounded-lg transition-colors flex items-center gap-1 shrink-0"
+                                              >
+                                                <span>📂</span> Agrupar
+                                              </button>
+                                            </div>
+                                          </>
+                                        ) : (
+                                          <div className="space-y-3 flex flex-col justify-between h-full w-full z-10 text-left">
+                                            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                                              <span className="text-xs font-black text-slate-500 uppercase tracking-wider">Agrupar Idea</span>
+                                              <button 
+                                                onClick={() => setGroupingResponseId(null)}
+                                                className="text-slate-400 hover:text-slate-600 p-0.5 rounded-md hover:bg-slate-50"
+                                              >
+                                                <X className="w-4 h-4" />
+                                              </button>
+                                            </div>
+                                            
+                                            {/* Existing Groups */}
+                                            {groups.length > 0 && (
+                                              <div className="space-y-1">
+                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Elegir existente:</p>
+                                                <div className="flex flex-wrap gap-1 max-h-[70px] overflow-y-auto">
+                                                  {groups.map((g) => (
+                                                    <button
+                                                      key={g}
+                                                      onClick={() => groupIdea(activePoll.id, idea.id, g)}
+                                                      className="px-2 py-1 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 text-[11px] font-bold text-slate-700 rounded-md transition-colors truncate max-w-[120px]"
+                                                    >
+                                                      {g}
+                                                    </button>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            )}
+                                            
+                                            {/* New Group input */}
+                                            <div className="space-y-1.5">
+                                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Nuevo grupo:</p>
+                                              <div className="flex gap-1.5">
+                                                <input
+                                                  type="text"
+                                                  value={newGroupNameInput}
+                                                  onChange={(e) => setNewGroupNameInput(e.target.value)}
+                                                  placeholder="Nombre..."
+                                                  className="flex-1 px-2 py-1 text-xs border border-slate-200 rounded-md bg-slate-50 outline-none focus:ring-1 focus:ring-indigo-500 focus:bg-white"
+                                                  onKeyDown={(e) => {
+                                                    if (e.key === 'Enter' && newGroupNameInput.trim()) {
+                                                      groupIdea(activePoll.id, idea.id, newGroupNameInput);
+                                                    }
+                                                  }}
+                                                />
+                                                <button
+                                                  onClick={() => {
+                                                    if (newGroupNameInput.trim()) {
+                                                      groupIdea(activePoll.id, idea.id, newGroupNameInput);
+                                                    }
+                                                  }}
+                                                  className="px-2 py-1 bg-indigo-600 text-white rounded-md text-xs font-black hover:bg-indigo-700 transition-colors shrink-0"
+                                                >
+                                                  Crear
+                                                </button>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        )}
+                                      </motion.div>
+                                    );
+                                  })}
+                                </AnimatePresence>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Grouped Categories */}
+                          {groups.length > 0 && (
+                            <div>
+                              <div className="flex items-center gap-3 mb-4">
+                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                                <h4 className="text-sm font-black text-slate-400 uppercase tracking-widest">
+                                  Ideas Agrupadas / Categorías ({groups.length})
+                                </h4>
+                              </div>
+                              
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {groups.map((groupName, idx) => {
+                                  const groupColor = colors[idx % colors.length] || colors[0];
+                                  const groupCards = grouped.filter(r => r.group === groupName);
+                                  
+                                  return (
+                                    <motion.div
+                                      key={groupName}
+                                      initial={{ opacity: 0, y: 15 }}
+                                      animate={{ opacity: 1, y: 0 }}
+                                      className={`rounded-3xl border-2 ${groupColor.bg} p-6 shadow-md flex flex-col gap-4 relative`}
+                                    >
+                                      <div className="flex items-center justify-between border-b border-slate-200/30 pb-3">
+                                        <div className="flex items-center gap-2">
+                                          <span className={`px-2.5 py-1 ${groupColor.badge} text-[10px] font-black rounded-lg uppercase tracking-wider`}>
+                                            Grupo {idx + 1}
+                                          </span>
+                                          <h5 className="font-black text-slate-900 text-base">{groupName}</h5>
+                                        </div>
+                                        <span className={`text-xs font-black ${groupColor.pill} px-2 py-0.5 rounded-full`}>
+                                          {groupCards.length} {groupCards.length === 1 ? 'idea' : 'ideas'}
+                                        </span>
+                                      </div>
+                                      
+                                      <div className="flex flex-col gap-2.5 max-h-[250px] overflow-y-auto pr-1">
+                                        <AnimatePresence mode="popLayout">
+                                          {groupCards.map((card) => (
+                                            <motion.div
+                                              key={card.id}
+                                              layout
+                                              initial={{ opacity: 0, x: -10 }}
+                                              animate={{ opacity: 1, x: 0 }}
+                                              exit={{ opacity: 0, x: 10 }}
+                                              className="bg-white p-3.5 rounded-xl border border-slate-100 shadow-sm flex items-start justify-between gap-3 group/item hover:border-indigo-100 text-left"
+                                            >
+                                              <div className="flex flex-col gap-1 flex-1 min-w-0">
+                                                <p className="text-slate-800 font-bold text-sm leading-snug">
+                                                  "{card.text || card.value}"
+                                                </p>
+                                                <span className="text-[10px] font-bold text-slate-400">
+                                                  👤 {card.participantName}
+                                                </span>
+                                              </div>
+                                              <button
+                                                onClick={() => ungroupIdea(activePoll.id, card.id)}
+                                                className="text-slate-400 hover:text-rose-600 p-1 hover:bg-rose-50 rounded-lg transition-colors md:opacity-0 group-hover/item:opacity-100 shrink-0"
+                                                title="Quitar del grupo"
+                                              >
+                                                <X className="w-3.5 h-3.5" />
+                                              </button>
+                                            </motion.div>
+                                          ))}
+                                        </AnimatePresence>
+                                      </div>
+                                    </motion.div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                ) : questions.find(q => q.id === (activePoll.currentQuestionId || questions[0]?.id))?.type === 'word-cloud' ? (
+                  <div className="flex flex-col gap-6 py-4 w-full">
+                    {(() => {
+                      const currentQ = questions.find(q => q.id === (activePoll.currentQuestionId || questions[0]?.id));
+                      const qResponses = responses.filter(r => r.questionId === currentQ?.id);
+                      
+                      // Calculate word frequency
+                      const wordCounts: { [key: string]: { text: string; count: number } } = {};
+                      qResponses.forEach(r => {
+                        const rawWord = String(r.value || r.text || '').trim();
+                        if (!rawWord) return;
+                        const key = rawWord.toLowerCase();
+                        if (wordCounts[key]) {
+                          wordCounts[key].count++;
+                        } else {
+                          wordCounts[key] = { text: rawWord, count: 1 };
+                        }
+                      });
+                      
+                      const wordsArray = Object.values(wordCounts).sort((a, b) => b.count - a.count);
+                      const maxCount = Math.max(...wordsArray.map(w => w.count), 1);
+                      const totalWords = qResponses.length;
+
+                      const colors = [
+                        'text-indigo-500 hover:text-indigo-600',
+                        'text-emerald-500 hover:text-emerald-600',
+                        'text-rose-500 hover:text-rose-600',
+                        'text-amber-500 hover:text-amber-600',
+                        'text-sky-500 hover:text-sky-600',
+                        'text-purple-500 hover:text-purple-600',
+                        'text-violet-500 hover:text-violet-600',
+                        'text-teal-500 hover:text-teal-600',
+                      ];
+
+                      const getWordStyle = (count: number, text: string) => {
+                        const ratio = count / maxCount;
+                        let sizeClass = 'text-base font-semibold opacity-70';
+                        if (ratio > 0.8) {
+                          sizeClass = 'text-4xl md:text-6xl font-black scale-105';
+                        } else if (ratio > 0.5) {
+                          sizeClass = 'text-2xl md:text-4xl font-extrabold opacity-95';
+                        } else if (ratio > 0.25) {
+                          sizeClass = 'text-lg md:text-2xl font-bold opacity-85';
+                        }
+                        
+                        let colorClass = 'text-slate-600';
+                        if (ratio > 0.8) {
+                          colorClass = 'text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-600 animate-pulse';
+                        } else {
+                          let hash = 0;
+                          for (let i = 0; i < text.length; i++) {
+                            hash = text.charCodeAt(i) + ((hash << 5) - hash);
+                          }
+                          colorClass = colors[Math.abs(hash) % colors.length];
+                        }
+
+                        return `${sizeClass} ${colorClass}`;
+                      };
+
+                      if (totalWords === 0) {
+                        return (
+                          <div className="p-12 border-2 border-dashed border-slate-100 rounded-[2.5rem] text-center text-slate-300 font-bold text-lg">
+                            Esperando palabras de los participantes...
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="space-y-6 w-full">
+                          {/* Stats Header */}
+                          <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                            <span className="text-xs font-black text-slate-400 uppercase tracking-widest">
+                              Nube de Palabras en Vivo
+                            </span>
+                            <div className="flex gap-4 text-xs font-black text-indigo-600 bg-indigo-50 px-3.5 py-1.5 rounded-full uppercase tracking-wider">
+                              <span>{wordsArray.length} Palabras Únicas</span>
+                              <span>•</span>
+                              <span>{totalWords} Envíos</span>
+                            </div>
+                          </div>
+
+                          {/* Cloud Canvas */}
+                          <div className="bg-slate-50/50 border border-slate-100 rounded-[2.5rem] p-10 min-h-[350px] flex flex-wrap gap-x-8 gap-y-5 items-center justify-center relative overflow-hidden select-none">
+                            <AnimatePresence mode="popLayout">
+                              {wordsArray.map((item, idx) => (
+                                <motion.span
+                                  key={item.text}
+                                  layout
+                                  initial={{ opacity: 0, scale: 0.4 }}
+                                  animate={{ opacity: 1, scale: 1 }}
+                                  exit={{ opacity: 0, scale: 0.4 }}
+                                  className={`inline-block transition-transform duration-300 hover:scale-110 cursor-default uppercase ${getWordStyle(item.count, item.text)}`}
+                                  title={`${item.count} votos`}
+                                >
+                                  {item.text}
+                                  {item.count > 1 && (
+                                    <span className="ml-1 text-[10px] font-black tracking-normal px-1.5 py-0.5 bg-slate-200/60 rounded-full text-slate-600 align-super leading-none">
+                                      {item.count}
+                                    </span>
+                                  )}
+                                </motion.span>
+                              ))}
+                            </AnimatePresence>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                ) : questions.find(q => q.id === (activePoll.currentQuestionId || questions[0]?.id))?.type === 'guess-name' ? (
+                  <div className="flex flex-col lg:flex-row gap-8 py-4 w-full text-left items-stretch">
+                    {(() => {
+                      const currentQ = questions.find(q => q.id === (activePoll.currentQuestionId || questions[0]?.id));
+                      const qResponses = responses.filter(r => r.questionId === currentQ?.id);
+                      
+                      const correctGuesses = qResponses.filter(r => 
+                        String(r.value || r.text || '').trim().toLowerCase() === String(currentQ?.correctAnswer || '').trim().toLowerCase()
+                      ).length;
+                      
+                      const incorrectGuesses = qResponses.length - correctGuesses;
+                      const pctCorrect = qResponses.length > 0 ? Math.round((correctGuesses / qResponses.length) * 100) : 0;
+                      
+                      return (
+                        <>
+                          {/* Left Panel: Image and Reveal Correct Answer */}
+                          <div className="flex-1 bg-white p-8 rounded-[3.5rem] shadow-xl border-4 border-slate-50 flex flex-col justify-between min-h-[450px]">
+                            <div>
+                              <span className="px-3 py-1 bg-indigo-50 text-indigo-600 text-xs font-black rounded-full uppercase tracking-widest mb-4 inline-block">
+                                Imagen de Referencia
+                              </span>
+                              <div className="w-full h-80 bg-slate-50 rounded-2xl overflow-hidden border border-slate-200 shadow-inner flex items-center justify-center relative mb-6">
+                                {currentQ?.imageUrl ? (
+                                  <img 
+                                    src={currentQ.imageUrl} 
+                                    alt="Guess Su Nombre" 
+                                    className="w-full h-full object-contain"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <div className="text-slate-300 text-sm font-bold">No hay imagen configurada</div>
+                                )}
+                              </div>
+                            </div>
+                            
+                            <div className="border-t border-slate-100 pt-6">
+                              <div className="flex items-center justify-between gap-4">
+                                <button
+                                  onClick={() => setRevealLiveAnswer(!revealLiveAnswer)}
+                                  className={`px-6 py-3 rounded-2xl text-xs font-black tracking-wider uppercase transition-all shadow-md ${revealLiveAnswer ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+                                >
+                                  {revealLiveAnswer ? 'Ocultar respuesta' : 'Revelar respuesta'}
+                                </button>
+                                
+                                <AnimatePresence>
+                                  {revealLiveAnswer && (
+                                    <motion.div 
+                                      initial={{ opacity: 0, scale: 0.9, x: 20 }}
+                                      animate={{ opacity: 1, scale: 1, x: 0 }}
+                                      exit={{ opacity: 0, scale: 0.9, x: 20 }}
+                                      className="flex-1 bg-emerald-50 border border-emerald-200 px-5 py-3 rounded-2xl text-right"
+                                    >
+                                      <span className="text-[10px] font-black text-emerald-500 uppercase tracking-wider block leading-none mb-1">Nombre correcto</span>
+                                      <span className="text-xl font-black text-emerald-700 uppercase tracking-tight">{currentQ?.correctAnswer}</span>
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Right Panel: Feed & Stats */}
+                          <div className="w-full lg:w-[460px] flex flex-col gap-6">
+                            {/* Stats */}
+                            <div className="bg-white p-6 rounded-[2.5rem] shadow-xl border-2 border-slate-50 flex flex-col justify-between">
+                              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block">Estadísticas en tiempo real</span>
+                              <div className="grid grid-cols-2 gap-4 text-center">
+                                <div className="bg-emerald-50 border border-emerald-100/50 p-4 rounded-2xl">
+                                  <span className="text-4xl font-black text-emerald-600 leading-none">{correctGuesses}</span>
+                                  <span className="text-[10px] font-bold text-emerald-700 block uppercase tracking-wider mt-1">Aciertos</span>
+                                </div>
+                                <div className="bg-rose-50 border border-rose-100/50 p-4 rounded-2xl">
+                                  <span className="text-4xl font-black text-rose-500 leading-none">{incorrectGuesses}</span>
+                                  <span className="text-[10px] font-bold text-rose-600 block uppercase tracking-wider mt-1">Fallos</span>
+                                </div>
+                              </div>
+                              {qResponses.length > 0 && (
+                                <div className="mt-4">
+                                  <div className="flex justify-between items-center text-xs font-bold text-slate-500 mb-1.5">
+                                    <span>Tasa de éxito</span>
+                                    <span className="text-indigo-600 font-black">{pctCorrect}%</span>
+                                  </div>
+                                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                                    <div className="bg-indigo-600 h-full transition-all duration-500" style={{ width: `${pctCorrect}%` }} />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Live Feed */}
+                            <div className="flex-1 bg-white p-6 rounded-[2.5rem] shadow-xl border-2 border-slate-50 flex flex-col min-h-[250px] max-h-[350px]">
+                              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block">Intentos recientes</span>
+                              <div className="flex-1 overflow-y-auto pr-1 space-y-2.5">
+                                <AnimatePresence mode="popLayout">
+                                  {qResponses.length === 0 ? (
+                                    <div className="text-center text-slate-300 font-bold py-12 text-sm">Esperando respuestas...</div>
+                                  ) : (
+                                    qResponses.map((r, idx) => {
+                                      const isCorrect = String(r.value || r.text || '').trim().toLowerCase() === String(currentQ?.correctAnswer || '').trim().toLowerCase();
+                                      return (
+                                        <motion.div 
+                                          key={r.id}
+                                          initial={{ opacity: 0, y: 10 }}
+                                          animate={{ opacity: 1, y: 0 }}
+                                          className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 text-left ${isCorrect ? 'bg-emerald-50/50 border-emerald-100' : 'bg-rose-50/30 border-rose-100'}`}
+                                        >
+                                          <div className="min-w-0">
+                                            <p className="text-[10px] font-black text-slate-400 font-bold">👤 {r.participantName}</p>
+                                            <p className={`text-sm font-black uppercase ${isCorrect ? 'text-emerald-700' : 'text-slate-700'}`}>"{r.value || r.text}"</p>
+                                          </div>
+                                          <span className={`px-2 py-0.5 text-[9px] font-black uppercase rounded ${isCorrect ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100/50 text-rose-700'}`}>
+                                            {isCorrect ? 'Correcto' : 'Fallo'}
+                                          </span>
+                                        </motion.div>
+                                      );
+                                    })
+                                  )}
+                                </AnimatePresence>
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                ) : questions.find(q => q.id === (activePoll.currentQuestionId || questions[0]?.id))?.type === 'complete-sequence' ? (
+                  <div className="flex flex-col gap-8 py-4 w-full text-left">
+                    {(() => {
+                      const currentQ = questions.find(q => q.id === (activePoll.currentQuestionId || questions[0]?.id));
+                      const qResponses = responses.filter(r => r.questionId === currentQ?.id);
+                      
+                      const correctGuesses = qResponses.filter(r => 
+                        String(r.value || r.text || '').trim().toLowerCase() === String(currentQ?.correctAnswer || '').trim().toLowerCase()
+                      ).length;
+                      const pctCorrect = qResponses.length > 0 ? Math.round((correctGuesses / qResponses.length) * 100) : 0;
+                      
+                      return (
+                        <>
+                          {/* Upper Panel: Sequence Chain visualization */}
+                          <div className="bg-white p-8 rounded-[3.5rem] shadow-xl border-4 border-slate-50 flex flex-col justify-between">
+                            <div>
+                              <span className="px-3 py-1 bg-indigo-50 text-indigo-600 text-xs font-black rounded-full uppercase tracking-widest mb-6 inline-block">
+                                Cadena de la secuencia
+                              </span>
+                              
+                              <div className="flex flex-wrap items-center justify-center gap-4 py-8 bg-slate-50 rounded-3xl border border-slate-100 px-6">
+                                {currentQ?.sequenceItems?.map((item, idx) => {
+                                  const isMissing = idx === currentQ.sequenceMissingIndex;
+                                  return (
+                                    <React.Fragment key={idx}>
+                                      {idx > 0 && (
+                                        <span className="text-indigo-400 text-2xl font-black shrink-0">➔</span>
+                                      )}
+                                      <motion.div 
+                                        layout
+                                        className={`px-6 py-4 rounded-2xl border-2 shrink-0 flex flex-col items-center justify-center min-w-[120px] transition-all duration-500 shadow-sm ${isMissing ? (revealLiveAnswer ? 'bg-emerald-50 border-emerald-300 scale-105 shadow-emerald-100' : 'bg-indigo-50/50 border-dashed border-indigo-300 scale-95') : 'bg-white border-slate-200'}`}
+                                      >
+                                        <span className="text-[10px] font-bold text-slate-400 mb-1">POSICIÓN {idx + 1}</span>
+                                        {isMissing ? (
+                                          <AnimatePresence mode="wait">
+                                            {revealLiveAnswer ? (
+                                              <motion.span 
+                                                key="correct"
+                                                initial={{ scale: 0.8, opacity: 0 }}
+                                                animate={{ scale: 1, opacity: 1 }}
+                                                className="text-base font-black text-emerald-700 uppercase"
+                                              >
+                                                {item}
+                                              </motion.span>
+                                            ) : (
+                                              <motion.span 
+                                                key="missing"
+                                                initial={{ opacity: 0 }}
+                                                animate={{ opacity: 1 }}
+                                                className="text-lg font-black text-indigo-500 tracking-widest"
+                                              >
+                                                ? ? ?
+                                              </motion.span>
+                                            )}
+                                          </AnimatePresence>
+                                        ) : (
+                                          <span className="text-base font-extrabold text-slate-700">{item}</span>
+                                        )}
+                                      </motion.div>
+                                    </React.Fragment>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between border-t border-slate-100 pt-6 mt-6">
+                              <button
+                                onClick={() => setRevealLiveAnswer(!revealLiveAnswer)}
+                                className={`px-6 py-3 rounded-2xl text-xs font-black tracking-wider uppercase transition-all shadow-md ${revealLiveAnswer ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}
+                              >
+                                {revealLiveAnswer ? 'Ocultar elemento' : 'Revelar elemento'}
+                              </button>
+                              
+                              <div className="flex gap-4 text-xs font-black text-indigo-600 bg-indigo-50 px-4 py-2 rounded-xl">
+                                <span>{qResponses.length} RESPUESTAS</span>
+                                <span>•</span>
+                                <span>{pctCorrect}% ACIERTO</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Lower Panel: Guesses List */}
+                          <div className="bg-white p-6 rounded-[2.5rem] shadow-xl border-2 border-slate-50 flex flex-col min-h-[250px]">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4 block">Feed en vivo de participantes</span>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                              <AnimatePresence mode="popLayout">
+                                {qResponses.length === 0 ? (
+                                  <div className="col-span-full text-center text-slate-300 font-bold py-12">Esperando respuestas en tiempo real...</div>
+                                ) : (
+                                  qResponses.map((r) => {
+                                    const isCorrect = String(r.value || r.text || '').trim().toLowerCase() === String(currentQ?.correctAnswer || '').trim().toLowerCase();
+                                    return (
+                                      <motion.div 
+                                        key={r.id}
+                                        initial={{ opacity: 0, scale: 0.95 }}
+                                        animate={{ opacity: 1, scale: 1 }}
+                                        className={`p-4 rounded-2xl border text-left flex items-center justify-between gap-3 ${isCorrect ? 'bg-emerald-50/50 border-emerald-100' : 'bg-rose-50/30 border-rose-100'}`}
+                                      >
+                                        <div className="min-w-0">
+                                          <p className="text-[9px] font-black text-slate-400">👤 {r.participantName}</p>
+                                          <p className={`text-sm font-black uppercase truncate ${isCorrect ? 'text-emerald-700' : 'text-slate-600'}`}>
+                                            {r.value || r.text}
+                                          </p>
+                                        </div>
+                                        <span className={`w-2 h-2 rounded-full shrink-0 ${isCorrect ? 'bg-emerald-500' : 'bg-rose-400'}`} />
+                                      </motion.div>
+                                    );
+                                  })
+                                )}
+                              </AnimatePresence>
+                            </div>
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                ) : questions.find(q => q.id === (activePoll.currentQuestionId || questions[0]?.id))?.type === 'open-ended' ? (
+                  <div className="grid gap-6 auto-rows-min grid-cols-1 md:grid-cols-2 lg:grid-cols-3 py-4 w-full text-left">
+                    {(() => {
+                      const currentQ = questions.find(q => q.id === (activePoll.currentQuestionId || questions[0]?.id));
+                      const qResponses = responses.filter(r => r.questionId === currentQ?.id);
+                      
+                      if (qResponses.length === 0) {
+                        return (
+                          <div className="col-span-full p-12 border-2 border-dashed border-slate-100 rounded-[2.5rem] text-center text-slate-300 font-bold text-lg w-full">
+                            Esperando respuestas abiertas de los participantes...
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <AnimatePresence mode="popLayout">
+                          {qResponses
+                            .sort((a, b) => b.createdAt - a.createdAt)
+                            .map((response, idx) => (
+                              <motion.div 
+                                key={response.id}
+                                layout
+                                initial={{ opacity: 0, scale: 0.9, y: 30 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.9, y: -20 }}
+                                transition={{ 
+                                  type: "spring", 
+                                  stiffness: 260, 
+                                  damping: 25 
+                                }}
+                                className="bg-white p-6 rounded-[2rem] shadow-xl shadow-slate-100/40 border-2 border-slate-50 flex flex-col justify-between min-h-[150px] relative overflow-hidden group hover:border-indigo-100 transition-all"
+                              >
+                                <p className="text-slate-800 font-extrabold leading-relaxed text-lg mb-4">
+                                  "{response.text || response.value}"
+                                </p>
+                                <div className="flex items-center justify-between border-t border-slate-50 pt-3 mt-auto">
+                                  <span className="text-xs font-black text-slate-400 uppercase tracking-widest truncate max-w-[150px]">
+                                    👤 {response.participantName}
+                                  </span>
+                                  <span className="text-[10px] font-black text-slate-300">
+                                    #{qResponses.length - idx}
+                                  </span>
+                                </div>
+                              </motion.div>
+                            ))}
+                        </AnimatePresence>
+                      );
                     })()}
                   </div>
                 ) : (
