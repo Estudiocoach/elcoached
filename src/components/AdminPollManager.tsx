@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/src/lib/firebase';
-import { collection, addDoc, query, where, orderBy, onSnapshot, doc, updateDoc, setDoc, getDoc } from 'firebase/firestore';
+import { collection, addDoc, query, where, orderBy, onSnapshot, doc, updateDoc, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { Poll, Question, Response, QuestionType, UserProfile } from '@/src/types';
 import { handleFirestoreError, OperationType } from '@/src/lib/firebase-utils';
 import { QRCodeDisplay } from './QRCodeDisplay';
 import { motion, AnimatePresence } from 'motion/react';
-import { LayoutDashboard, Plus, Trash2, Play, Users, MessageSquare, ArrowUp, ArrowDown, Edit2, Save, X, Eye, Settings, ChevronLeft, ChevronRight, Maximize, Minimize, LogOut, UserPlus, Share2, Sparkles } from 'lucide-react';
+import { LayoutDashboard, Plus, Trash2, Play, Users, MessageSquare, ArrowUp, ArrowDown, Edit2, Save, X, Eye, Settings, ChevronLeft, ChevronRight, Maximize, Minimize, LogOut, UserPlus, Share2, Layers, Menu, User as UserIcon } from 'lucide-react';
 import { User } from 'firebase/auth';
 
 interface AdminPollManagerProps {
@@ -18,16 +18,21 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
   const [activePollId, setActivePollId] = useState<string | null>(null);
   const activePoll = polls.find(p => p.id === activePollId) || null;
   const [newPollTítulo, setNewPollTítulo] = useState('');
+  const [newPollType, setNewPollType] = useState<'event' | 'challenge'>('event');
+  const [newPollPenaltyParticipant, setNewPollPenaltyParticipant] = useState('');
+  const [newPollPenaltyAdmin, setNewPollPenaltyAdmin] = useState('');
   const [questions, setPreguntas] = useState<Question[]>([]);
   const [responses, setResponses] = useState<Response[]>([]);
-  const [view, setView] = useState<'list' | 'create' | 'dashboard' | 'settings' | 'users'>('list');
+  const [view, setView] = useState<'list' | 'create' | 'dashboard' | 'settings' | 'users' | 'trash'>('list');
   const [viewMode, setViewMode] = useState<'editor' | 'live' | 'participants'>('editor');
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   // Question Creation state
   const [newQuestionType, setNewQuestionType] = useState<QuestionType>('text');
   const [newQuestionOptions, setNewQuestionOptions] = useState<string[]>(['', '']);
+  const [newQuestionCorrectAnswer, setNewQuestionCorrectAnswer] = useState<string>('');
   const [optionAImage, setOptionAImage] = useState('');
   const [optionBImage, setOptionBImage] = useState('');
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
@@ -41,6 +46,12 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
   const [sequenceItemsInput, setSequenceItemsInput] = useState('');
   const [sequenceMissingIndexInput, setSequenceMissingIndexInput] = useState<number>(0);
   const [revealLiveAnswer, setRevealLiveAnswer] = useState(false);
+
+  // Deletion and Trash states
+  const [pollToDelete, setPollToDelete] = useState<Poll | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [pollToPermanentDelete, setPollToPermanentDelete] = useState<Poll | null>(null);
+  const [showPermanentDeleteConfirm, setShowPermanentDeleteConfirm] = useState(false);
 
   useEffect(() => {
     setRevealLiveAnswer(false);
@@ -169,13 +180,21 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
   const createPoll = async () => {
     if (!newPollTítulo) return;
     try {
-      const docRef = await addDoc(collection(db, 'polls'), {
+      const payload: any = {
         title: newPollTítulo,
         createdAt: Date.now(),
         status: 'active',
         showQR: true,
-        creatorId: user.uid
-      });
+        creatorId: user.uid,
+        type: newPollType
+      };
+      
+      if (newPollType === 'challenge') {
+        payload.penaltyParticipant = newPollPenaltyParticipant;
+        payload.penaltyAdmin = newPollPenaltyAdmin;
+      }
+      
+      const docRef = await addDoc(collection(db, 'polls'), payload);
       
       const joinCode = docRef.id.slice(0, 7).toUpperCase();
       
@@ -187,11 +206,15 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
       // Write to the joinCodes mapping for single-get lookup capability
       await setDoc(doc(db, 'joinCodes', joinCode), {
         pollId: docRef.id,
-        createdAt: Date.now()
+        createdAt: payload.createdAt
       });
 
       setNewPollTítulo('');
-      setView('list');
+      setNewPollType('event');
+      setNewPollPenaltyParticipant('');
+      setNewPollPenaltyAdmin('');
+      setActivePollId(docRef.id);
+      setView('dashboard');
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'polls');
     }
@@ -272,6 +295,8 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
       correctAns = seqItems[sequenceMissingIndexInput] || '';
     } else if (newQuestionType === 'guess-name') {
       correctAns = guessNameCorrectAnswer.trim();
+    } else if (['multiple-choice', 'true-false', 'four-options'].includes(newQuestionType)) {
+      correctAns = newQuestionCorrectAnswer;
     }
 
     try {
@@ -295,6 +320,7 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
       setGuessNameCorrectAnswer('');
       setSequenceItemsInput('');
       setSequenceMissingIndexInput(0);
+      setNewQuestionCorrectAnswer('');
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, `polls/${pollId}/questions`);
     }
@@ -307,6 +333,47 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
       await deleteDoc(doc(db, 'polls', pollId, 'questions', questionId));
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `polls/${pollId}/questions/${questionId}`);
+    }
+  };
+
+  const deletePollToTrash = async (poll: Poll) => {
+    try {
+      await updateDoc(doc(db, 'polls', poll.id), {
+        isDeleted: true,
+        deletedAt: Date.now()
+      });
+      if (activePollId === poll.id) {
+        setActivePollId(null);
+        setView('list');
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `polls/${poll.id}`);
+    }
+  };
+
+  const restorePollFromTrash = async (poll: Poll) => {
+    try {
+      await updateDoc(doc(db, 'polls', poll.id), {
+        isDeleted: false,
+        deletedAt: null
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `polls/${poll.id}`);
+    }
+  };
+
+  const permanentlyDeletePoll = async (poll: Poll) => {
+    try {
+      if (poll.joinCode) {
+        try {
+          await deleteDoc(doc(db, 'joinCodes', poll.joinCode));
+        } catch (e) {
+          console.error("Error deleting joinCode mapping:", e);
+        }
+      }
+      await deleteDoc(doc(db, 'polls', poll.id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `polls/${poll.id}`);
     }
   };
 
@@ -404,129 +471,320 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
   const joinUrl = `${getBaseUrl()}?pollId=${activePoll?.id}`;
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col font-sans overflow-hidden">
-      <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0 shadow-sm z-10">
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-md">
-              <Sparkles className="w-6 h-6" />
+    <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row font-sans overflow-hidden relative">
+      {/* Sidebar Backdrop for Mobile */}
+      {isSidebarOpen && (
+        <button 
+          onClick={() => setIsSidebarOpen(false)}
+          className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-25 lg:hidden cursor-default w-full h-full border-none outline-none"
+          aria-label="Cerrar menú"
+        />
+      )}
+
+      {/* Sidebar */}
+      <aside className={`bg-white border-r border-slate-200 flex flex-col transition-all duration-300 fixed lg:relative inset-y-0 left-0 z-30 shrink-0 
+        ${isSidebarOpen ? 'translate-x-0 w-64 shadow-2xl lg:shadow-none' : '-translate-x-full lg:translate-x-0 w-64 lg:w-20'}
+      `}>
+        <div className="h-16 flex items-center justify-between px-4 border-b border-slate-200 shrink-0">
+          <div className={`flex items-center gap-3 overflow-hidden transition-all duration-300 ${isSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0'}`}>
+            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-md shrink-0">
+              <Layers className="w-5 h-5" />
             </div>
-            <h1 className="text-xl font-bold text-slate-800">
-              Coached!
-              <span className="text-indigo-600 text-sm font-normal ml-3 border-l border-slate-200 pl-3 uppercase tracking-wider">Admin Console</span>
+            <h1 className="text-lg font-black text-slate-800 tracking-tight whitespace-nowrap">
+              coached
             </h1>
           </div>
-          
-          <nav className="flex items-center gap-1 ml-4 bg-slate-50 p-1 rounded-xl border border-slate-200">
-            <button 
-              onClick={() => setView('list')}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${view === 'list' || view === 'dashboard' || view === 'create' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-              <LayoutDashboard className="w-4 h-4" />
-              Eventos
-            </button>
-            {profile?.role === 'admin' && (
-              <button 
-                onClick={() => setView('users')}
-                className={`px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${view === 'users' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-              >
-                <Users className="w-4 h-4" />
-                Usuarios
-              </button>
-            )}
-            <button 
-              onClick={() => setView('settings')}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${view === 'settings' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-              <Settings className="w-4 h-4" />
-              Ajustes
-            </button>
-          </nav>
+          <button 
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors shrink-0 mx-auto"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
         </div>
 
-        <div className="flex items-center gap-6">
-          {view === 'dashboard' && (
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
-              <span className="text-sm font-medium text-slate-600">
-                {new Set(responses.map(r => r.participantCode || r.participantName)).size} Participantes
-              </span>
-            </div>
+        <div className="flex-1 overflow-y-auto py-6 px-3 space-y-2">
+          <button 
+            onClick={() => setView('list')}
+            className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl font-bold transition-all ${view === 'list' || view === 'dashboard' || view === 'create' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'} ${!isSidebarOpen && 'justify-center'}`}
+            title="Eventos"
+          >
+            <LayoutDashboard className="w-5 h-5 shrink-0" />
+            <span className={`transition-all duration-300 whitespace-nowrap overflow-hidden ${isSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0'}`}>Eventos</span>
+          </button>
+          
+          {profile?.role === 'admin' && (
+            <button 
+              onClick={() => setView('users')}
+              className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl font-bold transition-all ${view === 'users' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'} ${!isSidebarOpen && 'justify-center'}`}
+              title="Usuarios"
+            >
+              <Users className="w-5 h-5 shrink-0" />
+              <span className={`transition-all duration-300 whitespace-nowrap overflow-hidden ${isSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0'}`}>Usuarios</span>
+            </button>
           )}
-          <div className="flex items-center gap-4 pl-6 border-l border-slate-200">
-            <div className="text-right hidden sm:block">
-              <p className="text-sm font-bold text-slate-900 leading-none">{profile?.displayName || user.displayName}</p>
+
+          <button 
+            onClick={() => setView('trash')}
+            className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl font-bold transition-all ${view === 'trash' ? 'bg-rose-50 text-rose-700' : 'text-slate-500 hover:bg-rose-50 hover:text-rose-600'} ${!isSidebarOpen && 'justify-center'}`}
+            title="Papelera"
+          >
+            <Trash2 className="w-5 h-5 shrink-0" />
+            <span className={`transition-all duration-300 whitespace-nowrap overflow-hidden ${isSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0'}`}>Papelera</span>
+          </button>
+
+          <button 
+            onClick={() => setView('settings')}
+            className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl font-bold transition-all ${view === 'settings' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'} ${!isSidebarOpen && 'justify-center'}`}
+            title="Ajustes"
+          >
+            <Settings className="w-5 h-5 shrink-0" />
+            <span className={`transition-all duration-300 whitespace-nowrap overflow-hidden ${isSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0'}`}>Ajustes</span>
+          </button>
+        </div>
+
+        <div className="p-4 border-t border-slate-200">
+          <div className={`flex items-center gap-3 mb-4 overflow-hidden transition-all duration-300 ${isSidebarOpen ? 'opacity-100 h-auto' : 'opacity-0 h-0 m-0'}`}>
+            <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center shrink-0">
+              <UserIcon className="w-5 h-5 text-slate-500" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-slate-900 truncate">{profile?.displayName || user.displayName}</p>
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{profile?.role || 'User'}</p>
             </div>
-            <button 
-              onClick={onSignOut}
-              className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
-              title="Cerrar Sesión"
-            >
-              <LogOut className="w-5 h-5" />
-            </button>
           </div>
+          <button 
+            onClick={onSignOut}
+            className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl font-bold transition-all text-slate-500 hover:bg-red-50 hover:text-red-600 ${!isSidebarOpen && 'justify-center'}`}
+            title="Cerrar Sesión"
+          >
+            <LogOut className="w-5 h-5 shrink-0" />
+            <span className={`transition-all duration-300 whitespace-nowrap overflow-hidden ${isSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0'}`}>Cerrar Sesión</span>
+          </button>
         </div>
-      </header>
+      </aside>
 
-      <main className="flex-1 flex overflow-hidden">
+      <main className="flex-1 flex flex-col overflow-hidden relative">
+        {/* Mobile Header Bar */}
+        <div className="lg:hidden h-14 bg-white border-b border-slate-200 px-4 flex items-center justify-between shrink-0 z-25">
+          <button 
+            onClick={() => setIsSidebarOpen(true)}
+            className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-slate-50 rounded-lg transition-colors"
+          >
+            <Menu className="w-6 h-6" />
+          </button>
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-black text-xs">
+              <Layers className="w-4 h-4" />
+            </div>
+            <span className="text-sm font-black text-slate-800 tracking-tight">coached</span>
+          </div>
+          <div className="w-10"></div> {/* Spacer for symmetry */}
+        </div>
+
+        {view === 'dashboard' && activePoll && (
+          <div className="hidden sm:flex absolute top-4 right-8 z-50 flex items-center gap-2 bg-white px-4 py-2 rounded-full shadow-md border border-slate-200">
+            <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+            <span className="text-sm font-bold text-slate-600">
+              {new Set(responses.map(r => r.participantCode || r.participantName)).size} Participantes
+            </span>
+          </div>
+        )}
         {view === 'list' ? (
+          <div className="flex-1 p-6 lg:p-8 overflow-y-auto">
+            <div className="max-w-6xl mx-auto">
+              <div className="flex flex-col sm:flex-row justify-between sm:items-end gap-4 mb-8">
+                <div>
+                  <h2 className="text-2xl lg:text-3xl font-black text-slate-900 tracking-tight mb-2">Panel Principal</h2>
+                  <p className="text-slate-500 font-medium text-sm lg:text-lg">Bienvenido de nuevo. Aquí tienes un resumen de tus actividades.</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button 
+                    onClick={() => {
+                      setNewPollType('event');
+                      setView('create');
+                    }}
+                    className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 active:scale-95"
+                  >
+                    <Plus className="w-5 h-5" />
+                    Nuevo Evento
+                  </button>
+                  <button 
+                    onClick={() => {
+                      setNewPollType('challenge');
+                      setView('create');
+                    }}
+                    className="flex items-center gap-2 px-6 py-3 bg-amber-500 text-white rounded-xl font-bold hover:bg-amber-600 transition-all shadow-lg shadow-amber-200 active:scale-95"
+                  >
+                    <Plus className="w-5 h-5" />
+                    Nuevo Desafío
+                  </button>
+                </div>
+              </div>
+
+              {/* Stats Overview */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+                <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm flex items-center gap-6">
+                  <div className="w-14 h-14 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                    <LayoutDashboard className="w-7 h-7" />
+                  </div>
+                  <div>
+                    <p className="text-slate-500 font-bold text-sm uppercase tracking-wider mb-1">Total Eventos</p>
+                    <p className="text-3xl font-black text-slate-900">{polls.filter(p => !p.isDeleted).length}</p>
+                  </div>
+                </div>
+                <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm flex items-center gap-6">
+                  <div className="w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                    <Play className="w-7 h-7" />
+                  </div>
+                  <div>
+                    <p className="text-slate-500 font-bold text-sm uppercase tracking-wider mb-1">Eventos Activos</p>
+                    <p className="text-3xl font-black text-slate-900">{polls.filter(p => !p.isDeleted && p.status === 'active').length}</p>
+                  </div>
+                </div>
+                <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm flex items-center gap-6">
+                  <div className="w-14 h-14 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                    <Users className="w-7 h-7" />
+                  </div>
+                  <div>
+                    <p className="text-slate-500 font-bold text-sm uppercase tracking-wider mb-1">Participantes</p>
+                    <p className="text-3xl font-black text-slate-900">{new Set(responses.map(r => r.participantCode || r.participantName)).size}</p>
+                  </div>
+                </div>
+              </div>
+
+              <h3 className="text-xl font-black text-slate-900 tracking-tight mb-6 flex items-center gap-2">
+                Tus Eventos
+                <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 text-sm font-bold">{polls.filter(p => !p.isDeleted).length}</span>
+              </h3>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {polls.filter(p => !p.isDeleted).map(poll => (
+                  <motion.div
+                    key={poll.id}
+                    layoutId={poll.id}
+                    className="group bg-white p-6 rounded-[2rem] border border-slate-200 hover:border-indigo-600 hover:shadow-xl transition-all text-left flex flex-col h-full relative overflow-hidden cursor-pointer"
+                    onClick={() => { setActivePollId(poll.id); setView('dashboard'); }}
+                  >
+                    <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-2 z-10">
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); setPollToDelete(poll); setShowDeleteConfirm(true); }}
+                        className="w-10 h-10 bg-white shadow-sm border border-slate-100 rounded-full flex items-center justify-center text-rose-500 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                        title="Mover a papelera"
+                      >
+                        <Trash2 className="w-5 h-5" />
+                      </button>
+                    </div>
+                    <div className="mb-6 flex justify-between items-start">
+                      <div className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-widest flex items-center gap-2 ${poll.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                        {poll.status === 'active' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>}
+                        {poll.status === 'active' ? 'En Vivo' : 'Cerrado'}
+                      </div>
+                      <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                        <Play className="w-5 h-5 ml-0.5" />
+                      </div>
+                    </div>
+                    <h3 className="text-2xl font-black text-slate-900 mb-3 group-hover:text-indigo-600 transition-colors leading-tight">{poll.title}</h3>
+                    <div className="mt-auto flex items-center justify-between pt-4 border-t border-slate-100">
+                      <p className="text-sm text-slate-500 font-bold flex items-center gap-2">
+                        <Users className="w-4 h-4 text-slate-400" />
+                        {new Date(poll.createdAt).toLocaleDateString()}
+                      </p>
+                      <div className="text-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity font-bold text-sm flex items-center gap-1">
+                        Abrir
+                        <ChevronRight className="w-4 h-4" />
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+
+              {polls.filter(p => !p.isDeleted).length === 0 && (
+                <div className="text-center py-20 bg-white rounded-[3rem] border-2 border-dashed border-slate-200">
+                  <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center mx-auto mb-6 text-indigo-400 shadow-inner">
+                    <Layers className="w-10 h-10" />
+                  </div>
+                  <h3 className="text-2xl font-black text-slate-900 mb-2">Aún no hay eventos</h3>
+                  <p className="text-slate-500 mb-8 max-w-sm mx-auto text-lg">Comienza creando tu primera sesión interactiva para interactuar con tu audiencia.</p>
+                  <div className="flex items-center justify-center gap-3">
+                    <button 
+                      onClick={() => {
+                        setNewPollType('event');
+                        setView('create');
+                      }}
+                      className="px-8 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center gap-2"
+                    >
+                      <Plus className="w-5 h-5" />
+                      Crear mi primer evento
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setNewPollType('challenge');
+                        setView('create');
+                      }}
+                      className="px-8 py-3 bg-amber-500 text-white rounded-xl font-bold hover:bg-amber-600 transition-all shadow-lg shadow-amber-100 flex items-center gap-2"
+                    >
+                      <Plus className="w-5 h-5" />
+                      Crear mi primer desafío
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : view === 'trash' ? (
           <div className="flex-1 p-8 overflow-y-auto">
             <div className="max-w-6xl mx-auto">
               <div className="flex justify-between items-center mb-8">
                 <div>
-                  <h2 className="text-3xl font-black text-slate-900 tracking-tight">Eventos</h2>
-                  <p className="text-slate-500 font-medium">Gestiona y lanza tus sesiones interactivas</p>
+                  <h2 className="text-3xl font-black text-slate-900 tracking-tight">Papelera</h2>
+                  <p className="text-slate-500 font-medium">Eventos eliminados recientemente</p>
                 </div>
-                <button 
-                  onClick={() => setView('create')}
-                  className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 active:scale-95"
-                >
-                  <Plus className="w-5 h-5" />
-                  Nuevo Evento
-                </button>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {polls.map(poll => (
-                  <motion.button
+                {polls.filter(p => p.isDeleted).map(poll => (
+                  <motion.div
                     key={poll.id}
                     layoutId={poll.id}
-                    onClick={() => { setActivePollId(poll.id); setView('dashboard'); }}
-                    className="group bg-white p-6 rounded-[2rem] border border-slate-200 hover:border-indigo-600 hover:shadow-xl transition-all text-left flex flex-col h-full relative overflow-hidden"
+                    className="group bg-white p-6 rounded-[2rem] border border-slate-200 hover:border-rose-600 hover:shadow-xl transition-all text-left flex flex-col h-full relative overflow-hidden"
                   >
-                    <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <div className="w-8 h-8 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-600">
-                        <Play className="w-4 h-4" />
-                      </div>
+                    <div className="absolute top-0 right-0 p-4 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-2">
+                      <button 
+                        onClick={() => restorePollFromTrash(poll)}
+                        className="px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg text-sm font-bold hover:bg-emerald-100 transition-colors"
+                        title="Restaurar"
+                      >
+                        Restaurar
+                      </button>
+                      <button 
+                        onClick={() => { setPollToPermanentDelete(poll); setShowPermanentDeleteConfirm(true); }}
+                        className="w-8 h-8 bg-rose-50 rounded-full flex items-center justify-center text-rose-600 hover:bg-rose-100 transition-colors"
+                        title="Eliminar permanentemente"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                     <div className="mb-4">
-                      <span className={`px-2 py-1 rounded text-[10px] font-black uppercase tracking-widest ${poll.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                        {poll.status === 'active' ? 'En Vivo' : 'Cerrado'}
+                      <span className="px-2 py-1 rounded text-[10px] font-black uppercase tracking-widest bg-rose-100 text-rose-700">
+                        Eliminado
                       </span>
                     </div>
-                    <h3 className="text-xl font-bold text-slate-900 mb-2 group-hover:text-indigo-600 transition-colors">{poll.title}</h3>
+                    <h3 className="text-xl font-bold text-slate-900 mb-2">{poll.title}</h3>
                     <p className="text-sm text-slate-400 font-medium mt-auto flex items-center gap-2">
                       <Users className="w-4 h-4" />
                       {new Date(poll.createdAt).toLocaleDateString()}
                     </p>
-                  </motion.button>
+                  </motion.div>
                 ))}
               </div>
 
-              {polls.length === 0 && (
+              {polls.filter(p => p.isDeleted).length === 0 && (
                 <div className="text-center py-20 bg-white rounded-[3rem] border-2 border-dashed border-slate-200">
                   <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300">
-                    <LayoutDashboard className="w-8 h-8" />
+                    <Trash2 className="w-8 h-8" />
                   </div>
-                  <h3 className="text-lg font-bold text-slate-900 mb-1">No hay eventos aún</h3>
-                  <p className="text-slate-500 mb-6">Comienza creando tu primera sesión interactiva</p>
-                  <button 
-                    onClick={() => setView('create')}
-                    className="px-6 py-2 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 transition-colors"
-                  >
-                    Crear Evento
-                  </button>
+                  <h3 className="text-lg font-bold text-slate-900 mb-1">La papelera está vacía</h3>
+                  <p className="text-slate-500">No hay eventos eliminados recientemente</p>
                 </div>
               )}
             </div>
@@ -568,6 +826,28 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
                     >
                       {isSavingProfile ? 'Guardando...' : 'Guardar Cambios'}
                     </button>
+                  </div>
+                </div>
+
+                <div className="pt-8 border-t border-slate-100">
+                  <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Información del Sistema</h3>
+                  <div className="space-y-2 text-[11px] text-slate-500 font-medium tracking-wide">
+                    <div className="flex justify-between">
+                      <span>PROJECT:</span>
+                      <strong className="text-slate-700">coached</strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>SESSION:</span>
+                      <strong className="text-slate-700">{activePoll?.id || 'STANDBY'}</strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>CREATOR:</span>
+                      <strong className="text-indigo-500 uppercase">{polls.find(p => p.id === activePoll?.id)?.creatorId === user.uid ? 'YOU' : 'OTHER'}</strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>ESTADO DEL SISTEMA:</span>
+                      <span className="text-emerald-600 font-black uppercase">Operativo</span>
+                    </div>
                   </div>
                 </div>
 
@@ -670,278 +950,95 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
             </div>
           </div>
         ) : view === 'create' ? (
-          <div className="flex-1 flex items-center justify-center p-8 bg-slate-50">
-            <div className="max-w-md w-full bg-white p-10 rounded-[2rem] shadow-xl border border-slate-200">
-              <h2 className="text-2xl font-bold text-slate-900 mb-2">Nuevo Evento</h2>
-              <p className="text-slate-500 mb-8">Configura tu sesión interactiva en vivo.</p>
-              <div className="space-y-6">
+          <div className="flex-1 flex items-center justify-center p-8 bg-slate-50 overflow-y-auto">
+            <div className="max-w-lg w-full bg-white p-8 md:p-12 rounded-[2.5rem] shadow-2xl border border-slate-100 my-auto">
+              <div className="mb-8 text-center">
+                <h2 className="text-3xl font-black text-slate-900 mb-2">Nueva Sesión</h2>
+                <p className="text-slate-500 font-medium">Configura tu sesión interactiva en vivo.</p>
+              </div>
+
+              <div className="space-y-8">
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Título del Evento</label>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Tipo de Sesión</label>
+                  <div className="grid grid-cols-1 gap-4">
+                    <button
+                      onClick={() => setNewPollType('event')}
+                      className={`p-5 rounded-2xl font-bold text-sm transition-all border-2 text-left flex items-start gap-4 ${newPollType === 'event' ? 'border-indigo-600 bg-indigo-50 text-indigo-950 shadow-sm' : 'border-slate-100 bg-white text-slate-500 hover:border-slate-200 hover:bg-slate-50'}`}
+                    >
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-xl ${newPollType === 'event' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                        📅
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-black text-sm mb-0.5 text-slate-800">Evento en Vivo</div>
+                        <p className="text-xs font-semibold text-slate-400 leading-normal">Sesión interactiva en vivo con votaciones, preguntas y nubes de palabras.</p>
+                      </div>
+                    </button>
+                    <button
+                      onClick={() => setNewPollType('challenge')}
+                      className={`p-5 rounded-2xl font-bold text-sm transition-all border-2 text-left flex items-start gap-4 ${newPollType === 'challenge' ? 'border-amber-500 bg-amber-50 text-amber-950 shadow-sm' : 'border-slate-100 bg-white text-slate-500 hover:border-slate-200 hover:bg-slate-50'}`}
+                    >
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-xl ${newPollType === 'challenge' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                        🔥
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-black text-sm mb-0.5 text-slate-800">Desafío Privado (con prenda)</div>
+                        <p className="text-xs font-semibold text-slate-400 leading-normal">Preguntas con aciertos y errores donde se asigna una prenda al perdedor.</p>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Título de la Sesión</label>
                   <input 
                     type="text" 
                     value={newPollTítulo}
                     onChange={(e) => setNewPollTítulo(e.target.value)}
-                    placeholder="ej. Reunión Anual"
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-600 focus:bg-white outline-none transition-all"
+                    placeholder="ej. Reunión Anual de Estrategia"
+                    className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-indigo-600/10 focus:border-indigo-600 focus:bg-white outline-none transition-all font-medium text-slate-900"
                   />
                 </div>
+
+                {newPollType === 'challenge' && (
+                  <div className="space-y-4 p-6 bg-amber-50/50 border border-amber-100 rounded-3xl animate-in fade-in slide-in-from-top-4 duration-300">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xl">⚖️</span>
+                      <h4 className="text-sm font-black text-amber-900 uppercase tracking-tight">Prendas del Desafío</h4>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-amber-700 uppercase tracking-widest mb-1.5">Si fallas alguna tenes que...</label>
+                      <input 
+                        type="text" 
+                        value={newPollPenaltyParticipant}
+                        onChange={(e) => setNewPollPenaltyParticipant(e.target.value)}
+                        placeholder="si falla tiene que"
+                        className="w-full px-4 py-3 bg-white border border-amber-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none transition-all text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-amber-700 uppercase tracking-widest mb-1.5">Si acertas todas tengo que</label>
+                      <input 
+                        type="text" 
+                        value={newPollPenaltyAdmin}
+                        onChange={(e) => setNewPollPenaltyAdmin(e.target.value)}
+                        placeholder="Si aciertas todas tengo que"
+                        className="w-full px-4 py-3 bg-white border border-amber-200 rounded-xl focus:ring-2 focus:ring-amber-500 outline-none transition-all text-sm"
+                      />
+                    </div>
+                  </div>
+                )}
+
                 <button 
                   onClick={createPoll}
-                  className="w-full py-4 bg-indigo-600 text-white rounded-xl font-bold text-lg hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-100"
+                  className={`w-full py-5 text-white rounded-2xl font-black text-lg transition-all shadow-lg hover:shadow-xl active:scale-[0.98] ${newPollType === 'challenge' ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-200/50' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200/50'}`}
                 >
-                  Crear Evento
+                  Crear {newPollType === 'challenge' ? 'Desafío' : 'Evento'}
                 </button>
               </div>
             </div>
           </div>
         ) : activePoll && (
-          <>
-            <aside className="w-80 border-r border-slate-200 bg-white p-6 flex flex-col shrink-0 overflow-y-auto shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-20">
-              <div className="flex flex-col gap-6">
-                <div>
-                  <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Añadir Nueva Pregunta</h3>
-                  <form onSubmit={(e) => {
-                    e.preventDefault();
-                    const form = e.target as HTMLFormElement;
-                    const input = form.elements.namedItem('question') as HTMLInputElement;
-                    if (input.value) {
-                      addQuestion(activePoll.id, input.value);
-                      input.value = '';
-                    }
-                  }} className="space-y-4">
-                    <div className="flex flex-col gap-3">
-                      <select 
-                        value={newQuestionType}
-                        onChange={(e) => handleTypeChange(e.target.value as QuestionType)}
-                        className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 font-bold hover:bg-slate-100 transition-colors cursor-pointer"
-                      >
-                        <option value="text">Respuesta Abierta (Estándar)</option>
-                        <option value="open-ended">Preguntas Abiertas (hasta 250 caracteres)</option>
-                        <option value="brainstorm">Lluvia de Ideas (hasta 75 caracteres)</option>
-                        <option value="word-cloud">Nube de Palabras (una sola palabra)</option>
-                        <option value="multiple-choice">Opción Múltiple (Dinámica)</option>
-                        <option value="four-options">4 Opciones (A, B, C, D)</option>
-                        <option value="true-false">Verdadero o Falso</option>
-                        <option value="rating">Calificación (1-10)</option>
-                        <option value="comparison">Comparación A vs B</option>
-                        <option value="guess-name">Adivina su nombre (Imagen + Entrada)</option>
-                        <option value="complete-sequence">Completa la secuencia</option>
-                      </select>
-                      <textarea 
-                        name="question"
-                        placeholder="Escribe tu pregunta aquí..."
-                        required
-                        rows={3}
-                        className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-600 outline-none resize-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white"
-                      />
-                      {newQuestionType === 'comparison' && (
-                        <div className="space-y-3">
-                          <div>
-                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">Opción A (HTML/URL Imagen)</label>
-                            <textarea 
-                              value={optionAImage}
-                              onChange={(e) => setOptionAImage(e.target.value)}
-                              placeholder='ej. <img src="..." /> o URL'
-                              className="w-full px-4 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-600 outline-none resize-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white"
-                              rows={2}
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">Opción B (HTML/URL Imagen)</label>
-                            <textarea 
-                              value={optionBImage}
-                              onChange={(e) => setOptionBImage(e.target.value)}
-                              placeholder='ej. <img src="..." /> o URL'
-                              className="w-full px-4 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-600 outline-none resize-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white"
-                              rows={2}
-                            />
-                          </div>
-                        </div>
-                      )}
-                      {newQuestionType === 'guess-name' && (
-                        <div className="space-y-3">
-                          <div>
-                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">URL de la Imagen</label>
-                            <input 
-                              type="text"
-                              value={guessNameImageUrl}
-                              onChange={(e) => setGuessNameImageUrl(e.target.value)}
-                              placeholder="https://ejemplo.com/imagen.jpg o URL"
-                              required
-                              className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white font-bold"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">Respuesta Correcta</label>
-                            <input 
-                              type="text"
-                              value={guessNameCorrectAnswer}
-                              onChange={(e) => setGuessNameCorrectAnswer(e.target.value)}
-                              placeholder="Nombre exacto a adivinar..."
-                              required
-                              className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white font-bold"
-                            />
-                          </div>
-                        </div>
-                      )}
-                      {newQuestionType === 'complete-sequence' && (
-                        <div className="space-y-3">
-                          <div>
-                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">Elementos (separados por coma)</label>
-                            <input 
-                              type="text"
-                              value={sequenceItemsInput}
-                              onChange={(e) => {
-                                setSequenceItemsInput(e.target.value);
-                                setSequenceMissingIndexInput(0);
-                              }}
-                              placeholder="Fase 1, Fase 2, Fase 3, Fase 4"
-                              required
-                              className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white font-bold"
-                            />
-                            <p className="text-[9px] text-slate-400 mt-1 ml-1 leading-normal font-bold uppercase tracking-wider">Escribe la serie en orden.</p>
-                          </div>
-                          
-                          {(() => {
-                            const items = sequenceItemsInput.split(',').map(item => item.trim()).filter(item => item);
-                            if (items.length === 0) return null;
-                            return (
-                              <div>
-                                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1 font-bold">Elemento Oculto a Completar</label>
-                                <select
-                                  value={sequenceMissingIndexInput}
-                                  onChange={(e) => setSequenceMissingIndexInput(Number(e.target.value))}
-                                  className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 font-black hover:bg-slate-100 transition-colors cursor-pointer"
-                                >
-                                  {items.map((item, idx) => (
-                                    <option key={idx} value={idx}>
-                                      {idx + 1}. {item} (Se ocultará)
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      )}
-                      {newQuestionType === 'multiple-choice' && (
-                        <div className="space-y-2">
-                          {newQuestionOptions.map((opt, i) => (
-                            <div key={i} className="flex items-center gap-2">
-                              <input 
-                                value={opt}
-                                onChange={(e) => {
-                                  const newOpts = [...newQuestionOptions];
-                                  newOpts[i] = e.target.value;
-                                  setNewQuestionOptions(newOpts);
-                                }}
-                                placeholder={`Opción ${i + 1}`}
-                                required={i < 2}
-                                className="flex-1 px-4 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white"
-                              />
-                              {i >= 2 && (
-                                <button 
-                                  type="button"
-                                  onClick={() => setNewQuestionOptions(opts => opts.filter((_, idx) => idx !== i))}
-                                  className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              )}
-                            </div>
-                          ))}
-                          <button 
-                            type="button"
-                            onClick={() => setNewQuestionOptions([...newQuestionOptions, ''])}
-                            className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1 mt-2"
-                          >
-                            <Plus className="w-3 h-3" />
-                            Añadir Opción
-                          </button>
-                        </div>
-                      )}
-                      {newQuestionType === 'four-options' && (
-                        <div className="space-y-2">
-                          {['A', 'B', 'C', 'D'].map((letter, i) => (
-                            <div key={i} className="flex items-center gap-2">
-                              <span className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-black text-sm border border-indigo-100 shrink-0">
-                                {letter}
-                              </span>
-                              <input 
-                                value={newQuestionOptions[i] || ''}
-                                onChange={(e) => {
-                                  const newOpts = [...newQuestionOptions];
-                                  newOpts[i] = e.target.value;
-                                  setNewQuestionOptions(newOpts);
-                                }}
-                                placeholder={`Opción ${letter}`}
-                                required
-                                className="flex-1 px-4 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white"
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {newQuestionType === 'true-false' && (
-                        <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl text-emerald-800 text-xs font-semibold flex items-center gap-2">
-                          <span>✓</span>
-                          <span>Esta pregunta mostrará dos opciones fijas para los participantes: Verdadero y Falso.</span>
-                        </div>
-                      )}
-                      {newQuestionType === 'brainstorm' && (
-                        <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-2xl text-indigo-800 text-xs font-semibold flex flex-col gap-1.5">
-                          <div className="flex items-center gap-2 font-black">
-                            <span>💡</span>
-                            <span>Lluvia de Ideas (Brainstorming)</span>
-                          </div>
-                          <p className="text-slate-600 font-medium">Los participantes pueden enviar múltiples ideas de hasta 75 caracteres. En la pantalla grande podrás agrupar las ideas parecidas en categorías personalizadas en tiempo real.</p>
-                        </div>
-                      )}
-                      {newQuestionType === 'word-cloud' && (
-                        <div className="p-4 bg-purple-50 border border-purple-100 rounded-2xl text-purple-800 text-xs font-semibold flex flex-col gap-1.5">
-                          <div className="flex items-center gap-2 font-black">
-                            <span>☁️</span>
-                            <span>Nube de Palabras</span>
-                          </div>
-                          <p className="text-slate-600 font-medium">Los participantes pueden enviar palabras individuales de hasta 30 caracteres. Se mostrará una nube interactiva con los términos más votados con mayor tamaño.</p>
-                        </div>
-                      )}
-                      {newQuestionType === 'open-ended' && (
-                        <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl text-blue-800 text-xs font-semibold flex flex-col gap-1.5">
-                          <div className="flex items-center gap-2 font-black">
-                            <span>💬</span>
-                            <span>Preguntas Abiertas (hasta 250 caracteres)</span>
-                          </div>
-                          <p className="text-slate-600 font-medium">Los participantes pueden escribir respuestas detalladas de hasta 250 caracteres. Se visualizarán en la pantalla grande como tarjetas elegantes con animación de entrada.</p>
-                        </div>
-                      )}
-                    </div>
-                    <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-xl font-black text-sm hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 hover:shadow-indigo-300 hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2">
-                      <Plus className="w-5 h-5" />
-                      ADD QUESTION
-                    </button>
-                  </form>
-                </div>
-
-                <div className="pt-6 border-t border-slate-100">
-                  <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Quick Actions</h3>
-                  <button 
-                    onClick={() => {
-                      if (questions.length > 0) {
-                        updateDoc(doc(db, 'polls', activePoll.id), {
-                          currentQuestionId: questions[questions.length - 1].id
-                        }).catch(err => handleFirestoreError(err, OperationType.UPDATE, `polls/${activePoll.id}`));
-                      }
-                    }}
-                    className="w-full py-3 bg-slate-50 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-100 hover:text-indigo-600 transition-colors flex items-center justify-center gap-2 border border-slate-200"
-                  >
-                    <Eye className="w-4 h-4" />
-                    Focus Last Question
-                  </button>
-                </div>
-              </div>
-            </aside>
-
+          <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
             <div className="flex-1 flex flex-col bg-slate-50 overflow-hidden relative">
               {/* Header with Mode Toggle */}
               <div className="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between z-10 relative shadow-sm">
@@ -968,6 +1065,14 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
                 </div>
 
                 <div className="flex items-center gap-4">
+                  <button 
+                    onClick={() => { setPollToDelete(activePoll); setShowDeleteConfirm(true); }}
+                    className="px-4 py-2 rounded-lg font-bold text-xs transition-colors shadow-sm flex items-center gap-2 bg-slate-100 text-slate-500 hover:bg-rose-50 hover:text-rose-600"
+                    title="Mover a papelera"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Eliminar
+                  </button>
                   <button 
                     onClick={togglePollStatus}
                     className={`px-4 py-2 rounded-lg font-bold text-xs transition-colors shadow-sm flex items-center gap-2 ${activePoll.status === 'active' ? 'bg-rose-50 text-rose-600 hover:bg-rose-100' : 'bg-emerald-500 text-white hover:bg-emerald-600'}`}
@@ -1287,31 +1392,6 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
                                   </div>
                                 </div>
                               </div>
-                              <div className="space-y-4">
-                                {participantResponses.map(r => {
-                                  const q = questions.find(question => question.id === r.questionId);
-                                  return (
-                                    <div key={r.id} className="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                                      <p className="text-xs font-bold text-slate-400 mb-2 truncate">{q?.text || 'Unknown question'}</p>
-                                      {r.value && (
-                                        <div className="mb-1">
-                                          {typeof r.value === 'number' ? (
-                                            <div className="flex items-end gap-1">
-                                              <span className="text-xl font-black text-indigo-600 leading-none">{r.value}</span>
-                                              <span className="text-xs font-bold text-slate-400">/ 10</span>
-                                            </div>
-                                          ) : (
-                                            <span className="px-2 py-1 bg-indigo-50 text-indigo-600 text-[10px] font-black rounded uppercase">
-                                              {r.value}
-                                            </span>
-                                          )}
-                                        </div>
-                                      )}
-                                      {r.text && <p className="text-sm font-semibold text-slate-800">{r.text}</p>}
-                                    </div>
-                                  );
-                                })}
-                              </div>
                             </div>
                           );
                         })}
@@ -1321,19 +1401,280 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
                 </AnimatePresence>
               </div>
             </div>
-          </>
+            {viewMode === 'editor' && (
+              <aside className="w-full lg:w-80 border-t lg:border-t-0 lg:border-l border-slate-200 bg-white p-6 flex flex-col shrink-0 overflow-y-auto shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-20">
+              <div className="flex flex-col gap-6">
+                <div>
+                  <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Añadir Nueva Pregunta</h3>
+                  <form onSubmit={(e) => {
+                    e.preventDefault();
+                    const form = e.target as HTMLFormElement;
+                    const input = form.elements.namedItem('question') as HTMLInputElement;
+                    if (input.value) {
+                      addQuestion(activePoll.id, input.value);
+                      input.value = '';
+                    }
+                  }} className="space-y-4">
+                    <div className="flex flex-col gap-3">
+                      <select 
+                        value={newQuestionType}
+                        onChange={(e) => handleTypeChange(e.target.value as QuestionType)}
+                        className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 font-bold hover:bg-slate-100 transition-colors cursor-pointer"
+                      >
+                        <option value="text">Respuesta Abierta (Estándar)</option>
+                        <option value="open-ended">Preguntas Abiertas (hasta 250 caracteres)</option>
+                        <option value="brainstorm">Lluvia de Ideas (hasta 75 caracteres)</option>
+                        <option value="word-cloud">Nube de Palabras (una sola palabra)</option>
+                        <option value="multiple-choice">Opción Múltiple (Dinámica)</option>
+                        <option value="four-options">4 Opciones (A, B, C, D)</option>
+                        <option value="true-false">Verdadero o Falso</option>
+                        <option value="rating">Calificación (1-10)</option>
+                        <option value="comparison">Comparación A vs B</option>
+                        <option value="guess-name">Adivina su nombre (Imagen + Entrada)</option>
+                        <option value="complete-sequence">Completa la secuencia</option>
+                      </select>
+                      <textarea 
+                        name="question"
+                        placeholder="Escribe tu pregunta aquí..."
+                        required
+                        rows={3}
+                        className="w-full px-4 py-3 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-600 outline-none resize-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white"
+                      />
+                      {newQuestionType === 'comparison' && (
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">Opción A (HTML/URL Imagen)</label>
+                            <textarea 
+                              value={optionAImage}
+                              onChange={(e) => setOptionAImage(e.target.value)}
+                              placeholder='ej. <img src="..." /> o URL'
+                              className="w-full px-4 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-600 outline-none resize-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white"
+                              rows={2}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">Opción B (HTML/URL Imagen)</label>
+                            <textarea 
+                              value={optionBImage}
+                              onChange={(e) => setOptionBImage(e.target.value)}
+                              placeholder='ej. <img src="..." /> o URL'
+                              className="w-full px-4 py-2 text-sm border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-600 outline-none resize-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white"
+                              rows={2}
+                            />
+                          </div>
+                        </div>
+                      )}
+                      {newQuestionType === 'guess-name' && (
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">URL de la Imagen</label>
+                            <input 
+                              type="text"
+                              value={guessNameImageUrl}
+                              onChange={(e) => setGuessNameImageUrl(e.target.value)}
+                              placeholder="https://ejemplo.com/imagen.jpg o URL"
+                              required
+                              className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white font-bold"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">Respuesta Correcta</label>
+                            <input 
+                              type="text"
+                              value={guessNameCorrectAnswer}
+                              onChange={(e) => setNewQuestionCorrectAnswer(e.target.value)}
+                              placeholder="Nombre exacto a adivinar..."
+                              required
+                              className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white font-bold"
+                            />
+                          </div>
+                        </div>
+                      )}
+                      {newQuestionType === 'complete-sequence' && (
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1">Elementos (separados por coma)</label>
+                            <input 
+                              type="text"
+                              value={sequenceItemsInput}
+                              onChange={(e) => {
+                                setSequenceItemsInput(e.target.value);
+                                setSequenceMissingIndexInput(0);
+                              }}
+                              placeholder="Fase 1, Fase 2, Fase 3, Fase 4"
+                              required
+                              className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white font-bold"
+                            />
+                            <p className="text-[9px] text-slate-400 mt-1 ml-1 leading-normal font-bold uppercase tracking-wider">Escribe la serie en orden.</p>
+                          </div>
+                          
+                          {(() => {
+                            const items = sequenceItemsInput.split(',').map(item => item.trim()).filter(item => item);
+                            if (items.length === 0) return null;
+                            return (
+                              <div>
+                                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 ml-1 font-bold">Elemento Oculto a Completar</label>
+                                <select
+                                  value={sequenceMissingIndexInput}
+                                  onChange={(e) => setSequenceMissingIndexInput(Number(e.target.value))}
+                                  className="w-full px-4 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 font-black hover:bg-slate-100 transition-colors cursor-pointer"
+                                >
+                                  {items.map((item, idx) => (
+                                    <option key={idx} value={idx}>
+                                      {idx + 1}. {item} (Se ocultará)
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                      {newQuestionType === 'multiple-choice' && (
+                        <div className="space-y-2">
+                          {newQuestionOptions.map((opt, i) => (
+                            <div key={i} className="flex items-center gap-2">
+                              <input 
+                                value={opt}
+                                onChange={(e) => {
+                                  const newOpts = [...newQuestionOptions];
+                                  newOpts[i] = e.target.value;
+                                  setNewQuestionOptions(newOpts);
+                                }}
+                                placeholder={`Opción ${i + 1}`}
+                                required={i < 2}
+                                className="flex-1 px-4 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white"
+                              />
+                              {i >= 2 && (
+                                <button 
+                                  type="button"
+                                  onClick={() => setNewQuestionOptions(opts => opts.filter((_, idx) => idx !== i))}
+                                  className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                          <button 
+                            type="button"
+                            onClick={() => setNewQuestionOptions([...newQuestionOptions, ''])}
+                            className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1 mt-2"
+                          >
+                            <Plus className="w-3 h-3" />
+                            Añadir Opción
+                          </button>
+                        </div>
+                      )}
+                      {newQuestionType === 'four-options' && (
+                        <div className="space-y-2">
+                          {['A', 'B', 'C', 'D'].map((letter, i) => (
+                            <div key={i} className="flex items-center gap-2">
+                              <span className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-black text-sm border border-indigo-100 shrink-0">
+                                {letter}
+                              </span>
+                              <input 
+                                value={newQuestionOptions[i] || ''}
+                                onChange={(e) => {
+                                  const newOpts = [...newQuestionOptions];
+                                  newOpts[i] = e.target.value;
+                                  setNewQuestionOptions(newOpts);
+                                }}
+                                placeholder={`Opción ${letter}`}
+                                required
+                                className="flex-1 px-4 py-2.5 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-600 outline-none bg-slate-50 hover:bg-slate-100 transition-colors focus:bg-white"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {newQuestionType === 'true-false' && (
+                        <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl text-emerald-800 text-xs font-semibold flex items-center gap-2">
+                          <span>✓</span>
+                          <span>Esta pregunta mostrará dos opciones fijas para los participantes: Verdadero y Falso.</span>
+                        </div>
+                      )}
+                      {newQuestionType === 'brainstorm' && (
+                        <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-2xl text-indigo-800 text-xs font-semibold flex flex-col gap-1.5">
+                          <div className="flex items-center gap-2 font-black">
+                            <span>💡</span>
+                            <span>Lluvia de Ideas (Brainstorming)</span>
+                          </div>
+                          <p className="text-slate-600 font-medium">Los participantes pueden enviar múltiples ideas de hasta 75 caracteres. En la pantalla grande podrás agrupar las ideas parecidas en categorías personalizadas en tiempo real.</p>
+                        </div>
+                      )}
+                      {newQuestionType === 'word-cloud' && (
+                        <div className="p-4 bg-purple-50 border border-purple-100 rounded-2xl text-purple-800 text-xs font-semibold flex flex-col gap-1.5">
+                          <div className="flex items-center gap-2 font-black">
+                            <span>☁️</span>
+                            <span>Nube de Palabras</span>
+                          </div>
+                          <p className="text-slate-600 font-medium">Los participantes pueden enviar palabras individuales de hasta 30 caracteres. Se mostrará una nube interactiva con los términos más votados con mayor tamaño.</p>
+                        </div>
+                      )}
+                      {newQuestionType === 'open-ended' && (
+                        <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl text-blue-800 text-xs font-semibold flex flex-col gap-1.5">
+                          <div className="flex items-center gap-2 font-black">
+                            <span>💬</span>
+                            <span>Preguntas Abiertas (hasta 250 caracteres)</span>
+                          </div>
+                          <p className="text-slate-600 font-medium">Los participantes pueden escribir respuestas detalladas de hasta 250 caracteres. Se visualizarán en la pantalla grande como tarjetas elegantes con animación de entrada.</p>
+                        </div>
+                      )}
+                    </div>
+                    {activePoll.type === 'challenge' && ['multiple-choice', 'true-false', 'four-options'].includes(newQuestionType) && (
+                      <div className="pt-4 border-t border-slate-100">
+                        <label className="block text-xs font-bold text-amber-600 uppercase tracking-widest mb-2">Seleccionar Respuesta Correcta</label>
+                        <select 
+                          value={newQuestionCorrectAnswer}
+                          onChange={(e) => setNewQuestionCorrectAnswer(e.target.value)}
+                          className="w-full px-4 py-2.5 text-sm border border-amber-200 rounded-lg focus:ring-2 focus:ring-amber-500 outline-none bg-amber-50 font-black hover:bg-amber-100 transition-colors cursor-pointer text-amber-800"
+                        >
+                          <option value="">Seleccione la opción correcta...</option>
+                          {newQuestionType === 'true-false' ? (
+                            <>
+                              <option value="Verdadero">Verdadero</option>
+                              <option value="Falso">Falso</option>
+                            </>
+                          ) : (
+                            newQuestionOptions.filter(opt => opt.trim() !== '').map((opt, idx) => (
+                              <option key={idx} value={opt}>{opt}</option>
+                            ))
+                          )}
+                        </select>
+                      </div>
+                    )}
+                    <button type="submit" className="w-full py-4 bg-indigo-600 text-white rounded-xl font-black text-sm hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 hover:shadow-indigo-300 hover:-translate-y-0.5 active:translate-y-0 flex items-center justify-center gap-2">
+                      <Plus className="w-5 h-5" />
+                      ADD QUESTION
+                    </button>
+                  </form>
+                </div>
+
+                <div className="pt-6 border-t border-slate-100">
+                  <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">Quick Actions</h3>
+                  <button 
+                    onClick={() => {
+                      if (questions.length > 0) {
+                        updateDoc(doc(db, 'polls', activePoll.id), {
+                          currentQuestionId: questions[questions.length - 1].id
+                        }).catch(err => handleFirestoreError(err, OperationType.UPDATE, `polls/${activePoll.id}`));
+                      }
+                    }}
+                    className="w-full py-3 bg-slate-50 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-100 hover:text-indigo-600 transition-colors flex items-center justify-center gap-2 border border-slate-200"
+                  >
+                    <Eye className="w-4 h-4" />
+                    Focus Last Question
+                  </button>
+                </div>
+              </div>
+            </aside>
+            )}
+          </div>
         )}
       </main>
 
       <footer className="h-10 bg-white border-t border-slate-200 flex items-center px-8 shrink-0 text-[11px] text-slate-400 font-medium tracking-wide">
-        <div className="flex gap-6">
-          <span>PROJECT: <strong className="text-slate-700">COACHED!</strong></span>
-          <span>SESSION: <strong className="text-slate-700">{activePoll?.id || 'STANDBY'}</strong></span>
-          <span>CREATOR: <strong className="text-indigo-500 uppercase">{polls.find(p => p.id === activePoll?.id)?.creatorId === user.uid ? 'YOU' : 'OTHER'}</strong></span>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          ESTADO DEL SISTEMA: <span className="text-emerald-600 font-black uppercase">Operativo</span>
-        </div>
       </footer>
 
       <AnimatePresence>
@@ -1342,22 +1683,22 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-slate-50 flex overflow-hidden"
+            className="fixed inset-0 z-50 bg-slate-50 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden"
           >
-            <div className="shrink-0 bg-white border-r border-slate-200 flex flex-col items-center justify-center p-8 relative overflow-hidden w-[420px]">
-              <div className="w-full flex-1 flex flex-col items-center justify-center min-w-[320px]">
-                <div className="mb-8 p-6 bg-slate-50 rounded-[2rem] shadow-inner">
-                  <QRCodeDisplay url={joinUrl} size={240} />
+            <div className="shrink-0 bg-white border-b lg:border-b-0 lg:border-r border-slate-200 flex flex-col items-center justify-center p-6 lg:p-8 relative overflow-hidden w-full lg:w-[420px]">
+              <div className="w-full flex-1 flex flex-col items-center justify-center max-w-sm lg:max-w-none mx-auto py-4 lg:py-0">
+                <div className="mb-4 lg:mb-8 p-4 lg:p-6 bg-slate-50 rounded-[2rem] shadow-inner">
+                  <QRCodeDisplay url={joinUrl} size={180} />
                 </div>
-                <h3 className="text-3xl font-black text-slate-900 mb-2 tracking-tighter text-center leading-tight">ÚNETE A LA<br/>CONVERSACIÓN</h3>
-                <p className="text-lg text-indigo-600 font-bold text-center break-all mb-8">{joinUrl.replace('https://', '')}</p>
-                <div className="w-full bg-slate-50 rounded-xl p-4 text-center">
-                  <p className="text-sm font-bold text-slate-700">Escanea el código para participar</p>
+                <h3 className="text-xl lg:text-3xl font-black text-slate-900 mb-2 tracking-tighter text-center leading-tight">ÚNETE A LA<br/>CONVERSACIÓN</h3>
+                <p className="text-sm lg:text-lg text-indigo-600 font-bold text-center break-all mb-4 lg:mb-8">{joinUrl.replace('https://', '')}</p>
+                <div className="w-full bg-slate-50 rounded-xl p-3 lg:p-4 text-center">
+                  <p className="text-xs lg:text-sm font-bold text-slate-700">Escanea el código para participar</p>
                 </div>
               </div>
             </div>
 
-            <div className="flex-1 flex flex-col p-8 overflow-y-auto bg-slate-50 relative">
+            <div className="flex-1 flex flex-col p-6 lg:p-8 overflow-y-auto bg-slate-50 relative min-h-[450px] lg:min-h-0">
               {profile?.logoHtml && (
                 <div className="absolute top-8 left-8 z-10 p-4 bg-white rounded-2xl shadow-lg border border-slate-100" dangerouslySetInnerHTML={{ __html: profile.logoHtml }} />
               )}
@@ -2403,6 +2744,94 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
                 )}
               </div>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showDeleteConfirm && pollToDelete && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border border-slate-100"
+            >
+              <div className="w-16 h-16 bg-rose-50 rounded-full flex items-center justify-center text-rose-600 mb-6">
+                <Trash2 className="w-8 h-8" />
+              </div>
+              <h2 className="text-2xl font-black text-slate-900 mb-2">Mover a la papelera</h2>
+              <p className="text-slate-500 mb-8">
+                ¿Estás seguro que deseas mover el evento <strong className="text-slate-900">{pollToDelete.title}</strong> a la papelera? Podrás restaurarlo más tarde si lo deseas.
+              </p>
+              <div className="flex gap-4">
+                <button
+                  onClick={() => { setShowDeleteConfirm(false); setPollToDelete(null); }}
+                  className="flex-1 py-3 px-4 rounded-xl font-bold text-slate-600 bg-slate-50 hover:bg-slate-100 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => {
+                    deletePollToTrash(pollToDelete);
+                    setShowDeleteConfirm(false);
+                    setPollToDelete(null);
+                  }}
+                  className="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-rose-600 hover:bg-rose-700 transition-colors shadow-lg shadow-rose-200"
+                >
+                  Mover a papelera
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showPermanentDeleteConfirm && pollToPermanentDelete && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-3xl p-8 max-w-md w-full shadow-2xl border-2 border-rose-100"
+            >
+              <div className="w-16 h-16 bg-rose-100 rounded-full flex items-center justify-center text-rose-600 mb-6">
+                <Trash2 className="w-8 h-8" />
+              </div>
+              <h2 className="text-2xl font-black text-rose-600 mb-2">Eliminar permanentemente</h2>
+              <p className="text-slate-600 mb-8 font-medium">
+                Esta acción <strong className="text-slate-900">no se puede deshacer</strong>. Se eliminará el evento "{pollToPermanentDelete.title}" y todos sus datos de forma permanente.
+              </p>
+              <div className="flex gap-4">
+                <button
+                  onClick={() => { setShowPermanentDeleteConfirm(false); setPollToPermanentDelete(null); }}
+                  className="flex-1 py-3 px-4 rounded-xl font-bold text-slate-600 bg-slate-50 hover:bg-slate-100 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => {
+                    permanentlyDeletePoll(pollToPermanentDelete);
+                    setShowPermanentDeleteConfirm(false);
+                    setPollToPermanentDelete(null);
+                  }}
+                  className="flex-1 py-3 px-4 rounded-xl font-bold text-white bg-rose-600 hover:bg-rose-700 transition-colors shadow-lg shadow-rose-200"
+                >
+                  Eliminar evento
+                </button>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>

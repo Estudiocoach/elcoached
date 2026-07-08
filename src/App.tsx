@@ -5,7 +5,7 @@ import { auth, db } from './lib/firebase';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, User, signOut } from 'firebase/auth';
 import { collection, getDocs, doc, getDoc, query, where } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
-import { Sparkles, LayoutDashboard, UserCircle } from 'lucide-react';
+import { Layers, LayoutDashboard, UserCircle } from 'lucide-react';
 
 export default function App() {
   const [pollId, setPollId] = useState<string | null>(null);
@@ -138,7 +138,7 @@ export default function App() {
                 onClick={handleGoogleSignIn}
                 className="w-full py-4 px-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-base font-bold transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 group"
               >
-                <Sparkles className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                <Layers className="w-5 h-5 group-hover:scale-110 transition-transform" />
                 <span>Iniciar Sesión con Google</span>
               </button>
               <button
@@ -156,7 +156,22 @@ export default function App() {
   }
 
   if (mode === 'participant' && pollId) {
-    return <ParticipantView pollId={pollId} />;
+    return (
+      <ParticipantView 
+        pollId={pollId} 
+        onExit={() => {
+          setPollId(null);
+          setMode('selection');
+          try {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('pollId');
+            window.history.replaceState({}, '', url.pathname + url.search);
+          } catch (e) {
+            console.error('Failed to clear pollId param:', e);
+          }
+        }} 
+      />
+    );
   }
 
   return (
@@ -166,10 +181,10 @@ export default function App() {
           <motion.div 
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
-            className="inline-flex items-center gap-2 px-4 py-1.5 bg-indigo-50 rounded-full text-sm font-bold text-indigo-700 border border-indigo-100"
+            className="inline-flex items-center gap-2 px-4 py-1.5 bg-slate-100 rounded-full text-sm font-bold text-slate-800 border border-slate-200"
           >
-            <Sparkles className="w-4 h-4" />
-            COACHED!
+            <Layers className="w-4 h-4" />
+            coached
           </motion.div>
           <motion.h1 
             initial={{ opacity: 0, y: 20 }}

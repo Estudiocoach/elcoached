@@ -4,13 +4,14 @@ import { collection, addDoc, query, where, orderBy, onSnapshot, doc, getDoc, set
 import { Poll, Question } from '@/src/types';
 import { handleFirestoreError, OperationType } from '@/src/lib/firebase-utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { Send, User, ChevronRight, Play, LogOut, Sparkles } from 'lucide-react';
+import { Send, User, ChevronRight, Play, LogOut, Layers } from 'lucide-react';
 
 interface ParticipantViewProps {
   pollId: string;
+  onExit?: () => void;
 }
 
-export function ParticipantView({ pollId }: ParticipantViewProps) {
+export function ParticipantView({ pollId, onExit }: ParticipantViewProps) {
   const [poll, setPoll] = useState<Poll | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [loadingPoll, setLoadingPoll] = useState(true);
@@ -22,6 +23,7 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [hasRevealedDestiny, setHasRevealedDestiny] = useState(false);
   
   const [responseText, setResponseText] = useState('');
   const [responseValue, setResponseValue] = useState<string | number>('');
@@ -114,6 +116,12 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
     !completedQuestionIds.has(q.id) && 
     (!answeredQuestionIds.has(q.id) || q.type === 'brainstorm' || q.type === 'word-cloud' || q.type === 'guess-name' || q.type === 'complete-sequence')
   );
+
+  useEffect(() => {
+    if (activeQuestion) {
+      setHasRevealedDestiny(false);
+    }
+  }, [activeQuestion]);
 
   const handleJoin = async (e?: FormEvent) => {
     if (e) e.preventDefault();
@@ -242,7 +250,7 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
           className="w-full max-w-md bg-white p-10 rounded-[2.5rem] shadow-xl border border-slate-200 text-center"
         >
           <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-8 shadow-lg shadow-indigo-100">
-            <Sparkles className="w-10 h-10 animate-bounce" />
+            <Layers className="w-10 h-10 animate-pulse" />
           </div>
           
           <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight leading-tight mb-2">
@@ -252,9 +260,15 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
             ¿Listo para Empezar?
           </p>
 
-          <p className="text-slate-500 mb-8 font-medium leading-relaxed">
-            Hola <strong className="text-slate-800 font-bold">{name}</strong>, ya estás registrado. Haz clic en el botón de abajo para ver y responder las preguntas de la sesión.
-          </p>
+          {poll?.type === 'challenge' ? (
+            <p className="text-slate-600 mb-8 font-medium leading-relaxed text-base">
+              Hola <strong className="text-slate-800 font-bold">{name}</strong> estas jugando una sesion privada, si respondes bien quien te invito tiene una prenda, y si respondes mal, vos tenes que cumplir su prenda ¿Estas listo?
+            </p>
+          ) : (
+            <p className="text-slate-500 mb-8 font-medium leading-relaxed">
+              Hola <strong className="text-slate-800 font-bold">{name}</strong>, ya estás registrado. Haz clic en el botón de abajo para ver y responder las preguntas de la sesión.
+            </p>
+          )}
 
           <button 
             onClick={() => {
@@ -365,17 +379,99 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
             <p className="text-slate-500 font-medium">El administrador ha cerrado esta sesión. Ya no se aceptan más respuestas.</p>
           </motion.div>
         ) : !activeQuestion ? (
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.98 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white p-10 rounded-[2.5rem] shadow-xl border border-slate-200 mb-6 text-center"
-          >
-            <div className="w-16 h-16 bg-emerald-500 rounded-2xl flex items-center justify-center text-white mb-6 shadow-lg shadow-emerald-100 mx-auto">
-              <Send className="w-8 h-8" />
-            </div>
-            <h3 className="text-2xl font-black text-slate-900 mb-2">¡Al día!</h3>
-            <p className="text-slate-500 font-medium">Has respondido todas las preguntas disponibles. Gracias por participar.</p>
-          </motion.div>
+          (() => {
+            if (poll?.type === 'challenge') {
+              if (!hasRevealedDestiny) {
+                return (
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.98 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="bg-white p-10 rounded-[2.5rem] shadow-xl border border-indigo-200 mb-6 text-center"
+                  >
+                    <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center text-indigo-500 mb-6 mx-auto border-4 border-indigo-100">
+                      <span className="text-3xl">🔮</span>
+                    </div>
+                    <h3 className="text-2xl font-black text-slate-900 mb-4 tracking-tight">¡Felicidades!</h3>
+                    <p className="text-slate-600 font-semibold text-lg mb-8 leading-relaxed">
+                      Respondiste todas las preguntas ¿Estas listo para revelar tu destino?
+                    </p>
+                    <button 
+                      onClick={() => setHasRevealedDestiny(true)}
+                      className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-lg hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center justify-center gap-3 active:scale-[0.98]"
+                    >
+                      REVELAR
+                    </button>
+                  </motion.div>
+                );
+              }
+
+              let errors = 0;
+              let totalEvaluated = 0;
+              questions.forEach(q => {
+                if (q.correctAnswer) {
+                  const resp = myResponses.find(r => r.questionId === q.id);
+                  if (resp) {
+                    totalEvaluated++;
+                    if (String(resp.value).trim().toLowerCase() !== String(q.correctAnswer).trim().toLowerCase()) {
+                      errors++;
+                    }
+                  }
+                }
+              });
+
+              if (errors > 0) {
+                return (
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.98 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="bg-white p-10 rounded-[2.5rem] shadow-xl border border-rose-200 mb-6 text-center"
+                  >
+                    <div className="w-20 h-20 bg-rose-50 rounded-full flex items-center justify-center text-rose-500 mb-6 mx-auto border-4 border-rose-100">
+                      <span className="text-3xl">⚠️</span>
+                    </div>
+                    <h3 className="text-3xl font-black text-slate-900 mb-4 tracking-tight">¡Has fallado!</h3>
+                    <p className="text-slate-500 font-medium text-lg mb-8">Tuviste {errors} {errors === 1 ? 'error' : 'errores'} en el desafío.</p>
+                    <div className="bg-rose-50 p-6 rounded-2xl border border-rose-100">
+                      <p className="text-sm font-bold text-rose-500 uppercase tracking-widest mb-2">Prenda para ti</p>
+                      <p className="text-xl font-black text-rose-900 leading-tight">Ahora tienes que {poll.penaltyParticipant || 'cumplir la prenda'}</p>
+                    </div>
+                  </motion.div>
+                );
+              } else if (totalEvaluated > 0) {
+                return (
+                  <motion.div 
+                    initial={{ opacity: 0, scale: 0.98 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="bg-white p-10 rounded-[2.5rem] shadow-xl border border-emerald-200 mb-6 text-center"
+                  >
+                    <div className="w-20 h-20 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-500 mb-6 mx-auto border-4 border-emerald-100">
+                      <span className="text-3xl">🎉</span>
+                    </div>
+                    <h3 className="text-3xl font-black text-slate-900 mb-4 tracking-tight">¡Perfección!</h3>
+                    <p className="text-slate-500 font-medium text-lg mb-8">Has respondido correctamente a todas las preguntas.</p>
+                    <div className="bg-emerald-50 p-6 rounded-2xl border border-emerald-100">
+                      <p className="text-sm font-bold text-emerald-600 uppercase tracking-widest mb-2">Prenda para el Admin</p>
+                      <p className="text-xl font-black text-emerald-900 leading-tight">Felicidades, ahora el admin tiene que hacer {poll.penaltyAdmin || 'la prenda'}</p>
+                    </div>
+                  </motion.div>
+                );
+              }
+            }
+            
+            return (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="bg-white p-10 rounded-[2.5rem] shadow-xl border border-slate-200 mb-6 text-center"
+              >
+                <div className="w-16 h-16 bg-emerald-500 rounded-2xl flex items-center justify-center text-white mb-6 shadow-lg shadow-emerald-100 mx-auto">
+                  <Send className="w-8 h-8" />
+                </div>
+                <h3 className="text-2xl font-black text-slate-900 mb-2">¡Al día!</h3>
+                <p className="text-slate-500 font-medium">Has respondido todas las preguntas disponibles. Gracias por participar.</p>
+              </motion.div>
+            );
+          })()
         ) : (
           (() => {
             const myResponse = myResponses.find(r => r.questionId === activeQuestion.id);
@@ -899,6 +995,9 @@ export function ParticipantView({ pollId }: ParticipantViewProps) {
                     setParticipantCode('');
                     setIsUnirseed(false);
                     setShowWelcomeScreen(false);
+                    if (onExit) {
+                      onExit();
+                    }
                   }}
                   className="flex-1 py-4 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-sm shadow-lg shadow-red-100 transition-colors active:scale-[0.98]"
                 >

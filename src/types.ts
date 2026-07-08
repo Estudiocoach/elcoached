@@ -17,6 +17,11 @@ export interface Poll {
   showQR?: boolean;
   creatorId: string;
   joinCode?: string;
+  isDeleted?: boolean;
+  deletedAt?: number;
+  type?: 'event' | 'challenge';
+  penaltyParticipant?: string;
+  penaltyAdmin?: string;
 }
 
 export type QuestionType = 'text' | 'multiple-choice' | 'rating' | 'comparison' | 'four-options' | 'true-false' | 'brainstorm' | 'word-cloud' | 'open-ended' | 'guess-name' | 'complete-sequence';
