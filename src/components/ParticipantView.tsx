@@ -112,10 +112,12 @@ export function ParticipantView({ pollId, onExit }: ParticipantViewProps) {
     });
   }, [pollId, isUnirseed, participantCode]);
 
-  const activeQuestion = questions.find(q => 
-    !completedQuestionIds.has(q.id) && 
-    (!answeredQuestionIds.has(q.id) || q.type === 'brainstorm' || q.type === 'word-cloud' || q.type === 'guess-name' || q.type === 'complete-sequence')
-  );
+  const activeQuestion = poll?.type === 'challenge'
+    ? questions.find(q => 
+        !completedQuestionIds.has(q.id) && 
+        (!answeredQuestionIds.has(q.id) || q.type === 'brainstorm' || q.type === 'word-cloud' || q.type === 'guess-name' || q.type === 'complete-sequence')
+      )
+    : questions.find(q => q.id === poll?.currentQuestionId);
 
   useEffect(() => {
     if (activeQuestion) {
@@ -451,7 +453,7 @@ export function ParticipantView({ pollId, onExit }: ParticipantViewProps) {
                     <p className="text-slate-500 font-medium text-lg mb-8">Has respondido correctamente a todas las preguntas.</p>
                     <div className="bg-emerald-50 p-6 rounded-2xl border border-emerald-100">
                       <p className="text-sm font-bold text-emerald-600 uppercase tracking-widest mb-2">Prenda para el Admin</p>
-                      <p className="text-xl font-black text-emerald-900 leading-tight">Felicidades, ahora el admin tiene que hacer {poll.penaltyAdmin || 'la prenda'}</p>
+                      <p className="text-xl font-black text-emerald-900 leading-tight">Felicidades, ahora el admin tiene {poll.penaltyAdmin || 'la prenda'}</p>
                     </div>
                   </motion.div>
                 );
@@ -464,11 +466,17 @@ export function ParticipantView({ pollId, onExit }: ParticipantViewProps) {
                 animate={{ opacity: 1, scale: 1 }}
                 className="bg-white p-10 rounded-[2.5rem] shadow-xl border border-slate-200 mb-6 text-center"
               >
-                <div className="w-16 h-16 bg-emerald-500 rounded-2xl flex items-center justify-center text-white mb-6 shadow-lg shadow-emerald-100 mx-auto">
-                  <Send className="w-8 h-8" />
+                <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-white mb-6 shadow-lg shadow-indigo-100 mx-auto">
+                  <Send className="w-8 h-8 animate-pulse" />
                 </div>
-                <h3 className="text-2xl font-black text-slate-900 mb-2">¡Al día!</h3>
-                <p className="text-slate-500 font-medium">Has respondido todas las preguntas disponibles. Gracias por participar.</p>
+                <h3 className="text-2xl font-black text-slate-900 mb-2">
+                  {poll?.type === 'event' ? 'Esperando al Presentador' : '¡Al día!'}
+                </h3>
+                <p className="text-slate-500 font-medium">
+                  {poll?.type === 'event' 
+                    ? 'Por favor, espera a que el organizador active la siguiente pregunta en la pantalla principal.' 
+                    : 'Has respondido todas las preguntas disponibles. Gracias por participar.'}
+                </p>
               </motion.div>
             );
           })()
