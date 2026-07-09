@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { AdminPollManager } from './components/AdminPollManager';
 import { ParticipantView } from './components/ParticipantView';
 import { auth, db } from './lib/firebase';
-import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, User, signOut } from 'firebase/auth';
+import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, User, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { collection, getDocs, doc, getDoc, query, where } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
-import { Layers, LayoutDashboard, UserCircle } from 'lucide-react';
+import { Layers, LayoutDashboard, UserCircle, Mail, Lock, AlertCircle, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 
 export default function App() {
   const [pollId, setPollId] = useState<string | null>(null);
@@ -13,11 +13,31 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Email login states
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
   // Join code states
   const [showJoinInput, setShowJoinInput] = useState(false);
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [resolvingCode, setResolvingCode] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Para asegurar que la app comience totalmente desde 0 (cerrada la sesión) la primera vez que se carga en esta sesión de navegador
+    const hasResetAuth = sessionStorage.getItem('has_reset_auth_v3');
+    if (!hasResetAuth) {
+      signOut(auth).then(() => {
+        sessionStorage.setItem('has_reset_auth_v3', 'true');
+      }).catch((err) => {
+        console.error('Error reset auth:', err);
+      });
+    }
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
@@ -60,6 +80,39 @@ export default function App() {
       setMode('admin');
     } catch (error) {
       console.error('Error signing in:', error);
+    }
+  };
+
+  const handleEmailAuth = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) {
+      setAuthError('Por favor ingresa tu correo y contraseña.');
+      return;
+    }
+    setAuthError(null);
+    setAuthLoading(true);
+    try {
+      if (isSignUp) {
+        await createUserWithEmailAndPassword(auth, email.trim(), password);
+      } else {
+        await signInWithEmailAndPassword(auth, email.trim(), password);
+      }
+      setMode('admin');
+    } catch (error: any) {
+      console.error('Auth error:', error);
+      let friendlyMessage = 'Ocurrió un error al autenticar.';
+      if (error.code === 'auth/wrong-password' || error.code === 'auth/user-not-found' || error.code === 'auth/invalid-credential') {
+        friendlyMessage = 'Correo o contraseña incorrectos.';
+      } else if (error.code === 'auth/invalid-email') {
+        friendlyMessage = 'El formato del correo es inválido.';
+      } else if (error.code === 'auth/weak-password') {
+        friendlyMessage = 'La contraseña debe tener al menos 6 caracteres.';
+      } else if (error.code === 'auth/email-already-in-use') {
+        friendlyMessage = 'Este correo ya está registrado.';
+      }
+      setAuthError(friendlyMessage);
+    } finally {
+      setAuthLoading(false);
     }
   };
 
@@ -126,29 +179,163 @@ export default function App() {
     if (!user) {
       return (
         <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 font-sans">
-          <div className="max-w-md w-full bg-white p-10 rounded-[2rem] shadow-xl border border-slate-200 text-center space-y-6">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-indigo-50 text-indigo-600 rounded-full mb-2">
-              <UserCircle className="w-8 h-8" />
+          <div className="max-w-md w-full bg-white p-8 md:p-10 rounded-[2rem] shadow-xl border border-slate-200 space-y-6">
+            <div className="text-center space-y-2">
+              <div className="inline-flex items-center justify-center w-14 h-14 bg-indigo-50 text-indigo-600 rounded-full">
+                <UserCircle className="w-8 h-8" />
+              </div>
+              <h2 className="text-2xl font-black text-slate-900 tracking-tight">
+                {isSignUp ? 'Crear Cuenta Admin' : 'Panel de Administrador'}
+              </h2>
+              <p className="text-sm text-slate-500 max-w-xs mx-auto">
+                {isSignUp 
+                  ? 'Regístrate para comenzar a diseñar tus eventos interactivos.' 
+                  : 'Inicia sesión para crear y moderar encuestas en tiempo real.'}
+              </p>
             </div>
-            <h2 className="text-2xl font-bold text-slate-800">Panel de Administrador</h2>
-            <p className="text-sm text-slate-500 leading-relaxed">
-              Inicia sesión de forma segura para crear encuestas, preguntas y ver las respuestas de tu audiencia en tiempo real.
-            </p>
-            <div className="space-y-3 pt-2">
-              <button
-                onClick={handleGoogleSignIn}
-                className="w-full py-4 px-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-base font-bold transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 group"
+
+            {authError && (
+              <motion.div 
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-red-50 border border-red-100 text-red-700 p-4 rounded-xl flex items-start gap-3 text-sm"
               >
-                <Layers className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                <span>Iniciar Sesión con Google</span>
+                <AlertCircle className="w-5 h-5 shrink-0 text-red-500" />
+                <span>{authError}</span>
+              </motion.div>
+            )}
+
+            <form onSubmit={handleEmailAuth} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-slate-600 uppercase tracking-wider block">
+                  Correo Electrónico
+                </label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-slate-400">
+                    <Mail className="w-5 h-5" />
+                  </span>
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      if (authError) setAuthError(null);
+                    }}
+                    placeholder="ejemplo@correo.com"
+                    className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 hover:border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl text-slate-900 text-sm transition-all outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-bold text-slate-600 uppercase tracking-wider block">
+                    Contraseña
+                  </label>
+                </div>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-slate-400">
+                    <Lock className="w-5 h-5" />
+                  </span>
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    value={password}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      if (authError) setAuthError(null);
+                    }}
+                    placeholder="••••••••"
+                    className="w-full pl-11 pr-11 py-3 bg-slate-50 border border-slate-200 hover:border-slate-300 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-xl text-slate-900 text-sm transition-all outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600"
+                  >
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={authLoading}
+                className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 active:scale-[0.99]"
+              >
+                {authLoading ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <span>{isSignUp ? 'Crear Cuenta' : 'Iniciar Sesión'}</span>
+                )}
               </button>
+            </form>
+
+            <div className="text-center">
               <button
-                onClick={() => setMode('selection')}
-                className="w-full py-4 px-6 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl text-sm font-bold transition-all border border-slate-200"
+                type="button"
+                onClick={() => {
+                  setIsSignUp(!isSignUp);
+                  setAuthError(null);
+                }}
+                className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
               >
-                Volver al Inicio
+                {isSignUp 
+                  ? '¿Ya tienes una cuenta? Inicia Sesión' 
+                  : '¿No tienes cuenta? Regístrate aquí'}
               </button>
             </div>
+
+            <div className="relative flex items-center justify-center py-1">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-slate-100"></div>
+              </div>
+              <span className="relative bg-white px-3 text-xs uppercase text-slate-400 font-bold tracking-wider">
+                o continuar con
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleGoogleSignIn}
+              className="w-full py-3.5 px-4 bg-white border border-slate-200 hover:border-indigo-600 hover:bg-slate-50 text-slate-700 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2.5 active:scale-[0.99] shadow-sm"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24">
+                <path
+                  fill="#EA4335"
+                  d="M5.266 9.765A7.077 7.077 0 0 1 12 4.909c1.69 0 3.218.6 4.418 1.582l3.51-3.51C17.642 1.053 14.97 0 12 0 7.354 0 3.307 2.67 1.258 6.56l3.924 3.01c.026-.065.056-.13.084-.195z"
+                />
+                <path
+                  fill="#4285F4"
+                  d="M16.04 15.345c-1.077.733-2.433 1.164-4.04 1.164-2.855 0-5.274-1.928-6.136-4.526l-3.93 3.03A11.952 11.952 0 0 0 12 24c3.236 0 6.136-1.073 8.355-2.918l-3.924-3.003c-1.042.664-2.39 1.109-3.95 1.109-.136 0-.268-.014-.4-.018z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.904 11.983c0-.682.12-1.336.314-1.955l-3.923-3.01A11.918 11.918 0 0 0 0 12c0 1.773.39 3.455 1.077 4.968l3.925-3.03c-.2-.619-.314-1.282-.314-1.955z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 4.909c1.69 0 3.218.6 4.418 1.582l3.51-3.51C17.642 1.053 14.97 0 12 0c-1.1 0-2.17.15-3.19.43l3.22 3.22a7.11 7.11 0 0 1 1.97-.24h.02c1.69 0 3.218.6 4.418 1.582l3.51-3.51c-.13-.13-.268-.255-.407-.377L16.418 6.49c-1.2-.982-2.727-1.582-4.418-1.582z"
+                />
+                <path
+                  fill="#4285F4"
+                  d="M23.49 12.275c0-.825-.075-1.613-.213-2.375H12v4.5h6.48c-.28 1.448-1.1 2.675-2.325 3.5l3.924 3.004c2.296-2.114 3.611-5.219 3.611-8.629z"
+                />
+              </svg>
+              <span>Google</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setMode('selection');
+                setAuthError(null);
+              }}
+              className="w-full py-3.5 px-4 bg-slate-50 hover:bg-slate-100 text-slate-600 rounded-xl text-xs font-bold transition-all border border-slate-200 flex items-center justify-center gap-2 active:scale-[0.99]"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Volver al Inicio</span>
+            </button>
           </div>
         </div>
       );
@@ -255,7 +442,7 @@ export default function App() {
               </div>
             ) : (
               <button 
-                onClick={handleGoogleSignIn}
+                onClick={() => setMode('admin')}
                 className="w-full p-6 bg-white border border-slate-200 hover:border-indigo-600 hover:bg-slate-50 rounded-xl transition-all group text-left flex items-center gap-5 shadow-sm"
               >
                 <div className="w-12 h-12 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-md group-hover:scale-105 transition-transform">
