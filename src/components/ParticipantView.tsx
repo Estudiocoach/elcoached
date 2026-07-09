@@ -117,7 +117,7 @@ export function ParticipantView({ pollId, onExit }: ParticipantViewProps) {
         !completedQuestionIds.has(q.id) && 
         (!answeredQuestionIds.has(q.id) || q.type === 'brainstorm' || q.type === 'word-cloud' || q.type === 'guess-name' || q.type === 'complete-sequence')
       )
-    : questions.find(q => q.id === poll?.currentQuestionId);
+    : questions.find(q => q.id === (poll?.currentQuestionId || questions[0]?.id) && !completedQuestionIds.has(q.id));
 
   useEffect(() => {
     if (activeQuestion) {

@@ -55,6 +55,7 @@ export default function App() {
   const handleGoogleSignIn = async () => {
     try {
       const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
       await signInWithPopup(auth, provider);
       setMode('admin');
     } catch (error) {
@@ -213,21 +214,59 @@ export default function App() {
           <h2 className="text-2xl font-bold text-slate-800 mb-8">Consola de Acceso</h2>
           
           <div className="space-y-4">
-            <button 
-              onClick={() => {
-                if (user) setMode('admin');
-                else handleGoogleSignIn();
-              }}
-              className="w-full p-6 bg-white border border-slate-200 hover:border-indigo-600 hover:bg-slate-50 rounded-xl transition-all group text-left flex items-center gap-5 shadow-sm"
-            >
-              <div className="w-12 h-12 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-md group-hover:scale-105 transition-transform">
-                <LayoutDashboard className="w-6 h-6" />
+            {user ? (
+              <div className="space-y-3">
+                <button 
+                  onClick={() => setMode('admin')}
+                  className="w-full p-6 bg-white border border-indigo-100 hover:border-indigo-600 hover:bg-slate-50/50 rounded-xl transition-all group text-left flex items-center gap-5 shadow-sm"
+                >
+                  <div className="w-12 h-12 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-md group-hover:scale-105 transition-transform">
+                    <LayoutDashboard className="w-6 h-6" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-bold text-slate-900 text-lg truncate">{`Panel de ${user.displayName || 'Administrador'}`}</h3>
+                    <p className="text-sm text-slate-500 truncate">{user.email}</p>
+                  </div>
+                </button>
+                <div className="flex justify-end gap-3 px-1">
+                  <button
+                    onClick={async () => {
+                      try {
+                        const provider = new GoogleAuthProvider();
+                        provider.setCustomParameters({ prompt: 'select_account' });
+                        await signOut(auth);
+                        await signInWithPopup(auth, provider);
+                        setMode('admin');
+                      } catch (error) {
+                        console.error('Error switching account:', error);
+                      }
+                    }}
+                    className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors bg-indigo-50 hover:bg-indigo-100/80 px-3 py-1.5 rounded-lg border border-indigo-100"
+                  >
+                    Iniciar con otra cuenta
+                  </button>
+                  <button
+                    onClick={handleSignOut}
+                    className="text-xs font-bold text-slate-500 hover:text-slate-800 transition-colors bg-slate-100 hover:bg-slate-200/80 px-3 py-1.5 rounded-lg border border-slate-200"
+                  >
+                    Cerrar sesión
+                  </button>
+                </div>
               </div>
-              <div>
-                <h3 className="font-bold text-slate-900 text-lg">{user ? `Panel de ${user.displayName?.split(' ')[0]}` : 'Administrador del Evento'}</h3>
-                <p className="text-sm text-slate-500">Gestiona preguntas y ve las respuestas</p>
-              </div>
-            </button>
+            ) : (
+              <button 
+                onClick={handleGoogleSignIn}
+                className="w-full p-6 bg-white border border-slate-200 hover:border-indigo-600 hover:bg-slate-50 rounded-xl transition-all group text-left flex items-center gap-5 shadow-sm"
+              >
+                <div className="w-12 h-12 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-md group-hover:scale-105 transition-transform">
+                  <LayoutDashboard className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-lg">Administrador del Evento</h3>
+                  <p className="text-sm text-slate-500">Gestiona preguntas y ve las respuestas</p>
+                </div>
+              </button>
+            )}
 
             <div className="relative py-6">
               <div className="absolute inset-0 flex items-center">
