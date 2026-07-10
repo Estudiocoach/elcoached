@@ -4,7 +4,7 @@ import { collection, addDoc, query, where, orderBy, onSnapshot, doc, getDoc, set
 import { Poll, Question } from '@/src/types';
 import { handleFirestoreError, OperationType } from '@/src/lib/firebase-utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { Send, User, ChevronRight, Play, LogOut, Layers } from 'lucide-react';
+import { Send, User, ChevronRight, Play, LogOut, Layers, Loader2 } from 'lucide-react';
 
 interface ParticipantViewProps {
   pollId: string;
@@ -21,6 +21,8 @@ export function ParticipantView({ pollId, onExit }: ParticipantViewProps) {
   const [isUnirseed, setIsUnirseed] = useState(false);
   const [showWelcomeScreen, setShowWelcomeScreen] = useState(false);
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
+  const [isPreparingSession, setIsPreparingSession] = useState(false);
+  const [preparingStep, setPreparingStep] = useState('');
   const [joinError, setJoinError] = useState<string | null>(null);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [hasRevealedDestiny, setHasRevealedDestiny] = useState(false);
@@ -133,12 +135,32 @@ export function ParticipantView({ pollId, onExit }: ParticipantViewProps) {
     }
 
     setIsGeneratingCode(true);
+    setIsPreparingSession(true);
     setJoinError(null);
+
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
     try {
+      setPreparingStep('Generando código único...');
+      await sleep(400);
+
       // Generate random 7-digit numeric code (Kahoot style)
       const code = Math.floor(1000000 + Math.random() * 9000000).toString();
 
-      // Save to state and localStorage immediately (Optimistic UI transition)
+      setPreparingStep('Registrando participante...');
+      await sleep(400);
+
+      // Register in Firestore and await it
+      await setDoc(doc(db, 'polls', pollId, 'participants', code), {
+        name: name.trim(),
+        code: code,
+        createdAt: Date.now()
+      });
+
+      setPreparingStep('Sincronizando base de datos...');
+      await sleep(400);
+
+      // Save to state and localStorage
       setParticipantCode(code);
       try {
         localStorage.setItem(`participant_name_${pollId}`, name.trim());
@@ -147,23 +169,25 @@ export function ParticipantView({ pollId, onExit }: ParticipantViewProps) {
         console.warn("localStorage is blocked or disabled in this environment:", e);
       }
 
-      // Transition to welcome screen instantly so the user has ZERO lag or freeze
-      setShowWelcomeScreen(true);
+      // Mark as joined so the queries and active listeners boot up
+      setIsUnirseed(true);
 
-      // Register in Firestore asynchronously (non-blocking background write)
-      setDoc(doc(db, 'polls', pollId, 'participants', code), {
-        name: name.trim(),
-        code: code,
-        createdAt: Date.now()
-      }).catch((err) => {
-        console.error('Background participant registration error:', err);
-      });
+      setPreparingStep('Conectando sesión en vivo...');
+      await sleep(600); // Give Firebase snapshot listeners time to initiate and sync
+
+      setPreparingStep('¡Preparación completada!');
+      await sleep(300);
+
+      // Transition to welcome screen
+      setShowWelcomeScreen(true);
 
     } catch (err) {
       console.error('Error registering participant:', err);
       setJoinError('Error al conectar con la sesión. Por favor, inténtalo de nuevo.');
+      setIsPreparingSession(false);
     } finally {
       setIsGeneratingCode(false);
+      setIsPreparingSession(false);
     }
   };
 
@@ -211,6 +235,51 @@ export function ParticipantView({ pollId, onExit }: ParticipantViewProps) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 font-sans">
         <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  if (isPreparingSession) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 font-sans">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="w-full max-w-md bg-white p-10 rounded-[2.5rem] shadow-xl border border-slate-200 text-center"
+        >
+          <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-8 shadow-lg shadow-indigo-100">
+            <Loader2 className="w-10 h-10 animate-spin" />
+          </div>
+          
+          <h2 className="text-2xl font-black text-slate-900 mb-2 leading-tight">
+            Preparando Sesión
+          </h2>
+          <p className="text-slate-500 font-medium italic mb-6">
+            Asegurando que todo esté listo para jugar...
+          </p>
+
+          <div className="space-y-4">
+            <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 flex items-center justify-center gap-3">
+              <span className="text-sm font-bold text-indigo-600 animate-pulse">
+                {preparingStep}
+              </span>
+            </div>
+            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner">
+              <motion.div 
+                key={preparingStep}
+                initial={{ width: '10%' }}
+                animate={{ 
+                  width: preparingStep.includes('Generando') ? '30%' : 
+                         preparingStep.includes('Registrando') ? '60%' : 
+                         preparingStep.includes('Sincronizando') ? '80%' : 
+                         preparingStep.includes('Conectando') ? '95%' : '100%' 
+                }}
+                transition={{ duration: 0.4, ease: "easeOut" }}
+                className="h-full bg-indigo-600 rounded-full"
+              />
+            </div>
+          </div>
+        </motion.div>
       </div>
     );
   }
