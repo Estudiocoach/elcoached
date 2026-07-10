@@ -127,6 +127,11 @@ export function ParticipantView({ pollId, onExit }: ParticipantViewProps) {
     if (e) e.preventDefault();
     if (!name.trim() || isGeneratingCode) return;
 
+    // Force keyboad close on mobile to prevent resize reflow animations from stalling or breaking layout transitions
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+
     setIsGeneratingCode(true);
     setJoinError(null);
     try {
@@ -232,8 +237,9 @@ export function ParticipantView({ pollId, onExit }: ParticipantViewProps) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 font-sans">
         <motion.div 
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.25, ease: "easeOut" }}
           className="w-full max-w-md bg-white p-10 rounded-[2.5rem] shadow-xl border border-slate-200 text-center"
         >
           <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-8 shadow-lg shadow-indigo-100">
@@ -276,8 +282,9 @@ export function ParticipantView({ pollId, onExit }: ParticipantViewProps) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 font-sans">
         <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.25, ease: "easeOut" }}
           className="w-full max-w-md bg-white p-10 rounded-[2.5rem] shadow-xl border border-slate-200"
         >
           <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-white mb-8 shadow-lg shadow-indigo-100">
@@ -286,7 +293,13 @@ export function ParticipantView({ pollId, onExit }: ParticipantViewProps) {
           <h1 className="text-3xl font-black text-slate-900 mb-2 leading-tight">Unirse a la Sesión</h1>
           <p className="text-slate-500 mb-8 font-medium italic">¡Bienvenido a {poll?.title || 'la sesión'}!</p>
           
-          <div className="space-y-6">
+          <form 
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleJoin();
+            }}
+            className="space-y-6"
+          >
             {joinError && (
               <div className="p-4 bg-red-50 border border-red-200 text-red-600 rounded-2xl text-sm font-semibold text-center">
                 {joinError}
@@ -299,11 +312,6 @@ export function ParticipantView({ pollId, onExit }: ParticipantViewProps) {
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && name.trim() && !isGeneratingCode) {
-                      handleJoin();
-                    }
-                  }}
                   placeholder="Ingresa tu nombre"
                   required
                   disabled={isGeneratingCode}
@@ -312,8 +320,7 @@ export function ParticipantView({ pollId, onExit }: ParticipantViewProps) {
               </div>
             </div>
             <button 
-              type="button"
-              onClick={() => handleJoin()}
+              type="submit"
               disabled={isGeneratingCode || !name.trim()}
               className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-lg hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 flex items-center justify-center gap-3 active:scale-[0.98] disabled:opacity-50"
             >
@@ -329,7 +336,7 @@ export function ParticipantView({ pollId, onExit }: ParticipantViewProps) {
                 </>
               )}
             </button>
-          </div>
+          </form>
         </motion.div>
       </div>
     );
