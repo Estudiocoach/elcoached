@@ -130,33 +130,10 @@ export function ParticipantView({ pollId, onExit }: ParticipantViewProps) {
     setIsGeneratingCode(true);
     setJoinError(null);
     try {
-      let code = '';
-      let isUnique = false;
-      let attempts = 0;
+      // Generate random 7-digit numeric code (Kahoot style)
+      const code = Math.floor(1000000 + Math.random() * 9000000).toString();
 
-      while (!isUnique && attempts < 15) {
-        // Generate random 7-digit numeric code like in Kahoot
-        code = Math.floor(1000000 + Math.random() * 9000000).toString();
-        const partDocRef = doc(db, 'polls', pollId, 'participants', code);
-        const snap = await getDoc(partDocRef);
-        if (!snap.exists()) {
-          isUnique = true;
-        }
-        attempts++;
-      }
-
-      if (!isUnique) {
-        throw new Error('No se pudo generar un código único.');
-      }
-
-      // Register participant in Firestore
-      await setDoc(doc(db, 'polls', pollId, 'participants', code), {
-        name: name.trim(),
-        code: code,
-        createdAt: Date.now()
-      });
-
-      // Save to state and localStorage
+      // Save to state and localStorage immediately (Optimistic UI transition)
       setParticipantCode(code);
       try {
         localStorage.setItem(`participant_name_${pollId}`, name.trim());
@@ -164,9 +141,19 @@ export function ParticipantView({ pollId, onExit }: ParticipantViewProps) {
       } catch (e) {
         console.warn("localStorage is blocked or disabled in this environment:", e);
       }
-      
-      // Show welcome screen step
+
+      // Transition to welcome screen instantly so the user has ZERO lag or freeze
       setShowWelcomeScreen(true);
+
+      // Register in Firestore asynchronously (non-blocking background write)
+      setDoc(doc(db, 'polls', pollId, 'participants', code), {
+        name: name.trim(),
+        code: code,
+        createdAt: Date.now()
+      }).catch((err) => {
+        console.error('Background participant registration error:', err);
+      });
+
     } catch (err) {
       console.error('Error registering participant:', err);
       setJoinError('Error al conectar con la sesión. Por favor, inténtalo de nuevo.');
