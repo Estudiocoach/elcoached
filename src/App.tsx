@@ -167,15 +167,14 @@ export default function App() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-      </div>
-    );
-  }
-
   if (mode === 'admin') {
+    if (loading) {
+      return (
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+          <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+        </div>
+      );
+    }
     if (!user) {
       return (
         <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 font-sans">
@@ -401,59 +400,61 @@ export default function App() {
           <h2 className="text-2xl font-bold text-slate-800 mb-8">Consola de Acceso</h2>
           
           <div className="space-y-4">
-            {user ? (
-              <div className="space-y-3">
-                <button 
-                  onClick={() => setMode('admin')}
-                  className="w-full p-6 bg-white border border-indigo-100 hover:border-indigo-600 hover:bg-slate-50/50 rounded-xl transition-all group text-left flex items-center gap-5 shadow-sm"
-                >
-                  <div className="w-12 h-12 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-md group-hover:scale-105 transition-transform">
-                    <LayoutDashboard className="w-6 h-6" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-bold text-slate-900 text-lg truncate">{`Panel de ${user.displayName || 'Administrador'}`}</h3>
-                    <p className="text-sm text-slate-500 truncate">{user.email}</p>
-                  </div>
-                </button>
-                <div className="flex justify-end gap-3 px-1">
-                  <button
-                    onClick={async () => {
-                      try {
-                        const provider = new GoogleAuthProvider();
-                        provider.setCustomParameters({ prompt: 'select_account' });
-                        await signOut(auth);
-                        await signInWithPopup(auth, provider);
-                        setMode('admin');
-                      } catch (error) {
-                        console.error('Error switching account:', error);
-                      }
-                    }}
-                    className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors bg-indigo-50 hover:bg-indigo-100/80 px-3 py-1.5 rounded-lg border border-indigo-100"
-                  >
-                    Iniciar con otra cuenta
-                  </button>
-                  <button
-                    onClick={handleSignOut}
-                    className="text-xs font-bold text-slate-500 hover:text-slate-800 transition-colors bg-slate-100 hover:bg-slate-200/80 px-3 py-1.5 rounded-lg border border-slate-200"
-                  >
-                    Cerrar sesión
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button 
-                onClick={() => setMode('admin')}
-                className="w-full p-6 bg-white border border-slate-200 hover:border-indigo-600 hover:bg-slate-50 rounded-xl transition-all group text-left flex items-center gap-5 shadow-sm"
+            <div className="grid grid-cols-2 gap-4">
+              {/* Botón Izquierdo: Siempre presente */}
+              <button
+                onClick={() => {
+                  setIsSignUp(false);
+                  setMode('admin');
+                }}
+                className="p-5 bg-white border border-slate-200 hover:border-indigo-600 hover:bg-indigo-50/20 rounded-xl transition-all group text-left flex flex-col justify-between gap-4 shadow-sm"
               >
-                <div className="w-12 h-12 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-md group-hover:scale-105 transition-transform">
-                  <LayoutDashboard className="w-6 h-6" />
+                <div className="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-md group-hover:scale-105 transition-transform">
+                  <LayoutDashboard className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-slate-900 text-lg">Administrador del Evento</h3>
-                  <p className="text-sm text-slate-500">Gestiona preguntas y ve las respuestas</p>
+                  <h3 className="font-bold text-slate-900 text-base">Iniciar a la sesión</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Accede al panel de control</p>
                 </div>
               </button>
-            )}
+
+              {/* Botón Derecho: Depende de si hay sesión iniciada */}
+              {loading ? (
+                <div className="p-5 bg-white border border-slate-200 rounded-xl flex flex-col justify-between gap-4 shadow-sm h-full min-h-[140px] items-center justify-center">
+                  <div className="w-8 h-8 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-center">Verificando...</p>
+                </div>
+              ) : user ? (
+                <button
+                  onClick={handleSignOut}
+                  className="p-5 bg-white border border-slate-200 hover:border-rose-500 hover:bg-rose-50/20 rounded-xl transition-all group text-left flex flex-col justify-between gap-4 shadow-sm"
+                >
+                  <div className="w-10 h-10 bg-rose-100 rounded-lg flex items-center justify-center text-rose-600 group-hover:scale-105 transition-transform">
+                    <UserCircle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-base">Cerrar sesión</h3>
+                    <p className="text-xs text-slate-500 mt-0.5 truncate">{user.displayName || user.email}</p>
+                  </div>
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    setIsSignUp(true);
+                    setMode('admin');
+                  }}
+                  className="p-5 bg-white border border-slate-200 hover:border-emerald-600 hover:bg-emerald-50/20 rounded-xl transition-all group text-left flex flex-col justify-between gap-4 shadow-sm"
+                >
+                  <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center text-emerald-600 group-hover:scale-105 transition-transform">
+                    <UserCircle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-base">Registrarse</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">Crea una nueva cuenta admin</p>
+                  </div>
+                </button>
+              )}
+            </div>
 
             <div className="relative py-6">
               <div className="absolute inset-0 flex items-center">
