@@ -28,15 +28,10 @@ export default function App() {
   const [joinError, setJoinError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Para asegurar que la app comience totalmente desde 0 (cerrada la sesión) la primera vez que se carga en esta sesión de navegador
-    const hasResetAuth = sessionStorage.getItem('has_reset_auth_v3');
-    if (!hasResetAuth) {
-      signOut(auth).then(() => {
-        sessionStorage.setItem('has_reset_auth_v3', 'true');
-      }).catch((err) => {
-        console.error('Error reset auth:', err);
-      });
-    }
+    // Para asegurar que la app comience totalmente desde 0, cerramos la sesión de forma proactiva cada vez que se carga/inicia la página
+    signOut(auth).catch((err) => {
+      console.error('Error reset auth:', err);
+    });
   }, []);
 
   useEffect(() => {
