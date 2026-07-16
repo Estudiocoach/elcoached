@@ -326,6 +326,15 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
     }
   };
 
+  const deleteResponse = async (pollId: string, responseId: string) => {
+    try {
+      const { deleteDoc } = await import('firebase/firestore');
+      await deleteDoc(doc(db, 'polls', pollId, 'responses', responseId));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `polls/${pollId}/responses/${responseId}`);
+    }
+  };
+
   const deleteQuestion = async (pollId: string, questionId: string) => {
     try {
       // Note: In a real app, you might want to delete responses too
@@ -2505,9 +2514,21 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
                                             <p className="text-[10px] font-black text-slate-400 font-bold">👤 {r.participantName}</p>
                                             <p className={`text-sm font-black uppercase ${isCorrect ? 'text-emerald-700' : 'text-slate-700'}`}>"{r.value || r.text}"</p>
                                           </div>
-                                          <span className={`px-2 py-0.5 text-[9px] font-black uppercase rounded ${isCorrect ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100/50 text-rose-700'}`}>
-                                            {isCorrect ? 'Correcto' : 'Fallo'}
-                                          </span>
+                                          <div className="flex items-center gap-2">
+                                            <span className={`px-2 py-0.5 text-[9px] font-black uppercase rounded ${isCorrect ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100/50 text-rose-700'}`}>
+                                              {isCorrect ? 'Correcto' : 'Fallo'}
+                                            </span>
+                                            <button 
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                deleteResponse(activePoll.id, r.id);
+                                              }}
+                                              className="p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                                              title="Eliminar respuesta"
+                                            >
+                                              <Trash2 className="w-3 h-3" />
+                                            </button>
+                                          </div>
                                         </motion.div>
                                       );
                                     })
@@ -2624,7 +2645,19 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
                                             {r.value || r.text}
                                           </p>
                                         </div>
-                                        <span className={`w-2 h-2 rounded-full shrink-0 ${isCorrect ? 'bg-emerald-500' : 'bg-rose-400'}`} />
+                                        <div className="flex items-center gap-2 shrink-0">
+                                          <span className={`w-2 h-2 rounded-full ${isCorrect ? 'bg-emerald-500' : 'bg-rose-400'}`} />
+                                          <button 
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              deleteResponse(activePoll.id, r.id);
+                                            }}
+                                            className="p-1 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                                            title="Eliminar respuesta"
+                                          >
+                                            <Trash2 className="w-3 h-3" />
+                                          </button>
+                                        </div>
                                       </motion.div>
                                     );
                                   })
@@ -2675,9 +2708,21 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
                                   <span className="text-xs font-black text-slate-400 uppercase tracking-widest truncate max-w-[150px]">
                                     👤 {response.participantName}
                                   </span>
-                                  <span className="text-[10px] font-black text-slate-300">
-                                    #{qResponses.length - idx}
-                                  </span>
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-[10px] font-black text-slate-300">
+                                      #{qResponses.length - idx}
+                                    </span>
+                                    <button 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        deleteResponse(activePoll.id, response.id);
+                                      }}
+                                      className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                                      title="Eliminar respuesta"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
                                 </div>
                               </motion.div>
                             ))}
@@ -2704,7 +2749,7 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
                             damping: 25,
                             mass: 1
                           }}
-                          className="bg-white p-6 rounded-3xl shadow-xl shadow-indigo-100/40 border-2 border-indigo-50 flex flex-col min-h-[140px] relative overflow-hidden"
+                          className="group bg-white p-6 rounded-3xl shadow-xl shadow-indigo-100/40 border-2 border-indigo-50 flex flex-col min-h-[140px] relative overflow-hidden"
                         >
                           <motion.div 
                             initial={{ opacity: 0.6, scale: 0.8 }}
@@ -2713,6 +2758,18 @@ export function AdminPollManager({ user, onSignOut }: AdminPollManagerProps) {
                             className="absolute inset-0 bg-indigo-200 z-0 pointer-events-none rounded-3xl"
                           />
                           <div className="relative z-10">
+                            <div className="absolute -top-2 -right-2 z-20">
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteResponse(activePoll.id, response.id);
+                                }}
+                                className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl opacity-0 group-hover:opacity-100 transition-all"
+                                title="Eliminar respuesta"
+                              >
+                                <Trash2 className="w-5 h-5" />
+                              </button>
+                            </div>
                             {response.value && (
                               <div className="mb-3">
                                 {typeof response.value === 'number' ? (
